@@ -4,8 +4,10 @@ Ferramenta de uso individual para prospecção outbound em cibersegurança. Ela 
 
 Não tem dependências: Node.js 22.5 ou mais recente, com o SQLite que já vem embutido no Node. Não tem etapa de build nem `npm install`.
 
+**No Windows:** dê dois cliques em `iniciar-crm.bat`. Ele abre o navegador em http://localhost:3000. Deixe a janela preta aberta enquanto usar.
+
 ```bash
-npm start                 # http://localhost:3000
+npm start                 # http://localhost:3000 (rodar dentro desta pasta)
 npm test                  # regras de negócio + API
 ```
 
