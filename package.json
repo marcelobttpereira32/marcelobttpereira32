@@ -1,0 +1,12 @@
+{
+  "name": "crm-prospeccao",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CRM de prospecção outbound de uso individual: fila de quem ligar hoje, registro rápido e nenhuma conta sem próximo passo.",
+  "main": "server.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "test": "node --no-warnings --test test/*.test.js"
+  }
+}
