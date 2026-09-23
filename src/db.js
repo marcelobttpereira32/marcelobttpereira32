@@ -1,62 +1,56 @@
 const { DatabaseSync } = require('node:sqlite');
 
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS accounts (
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
+
+CREATE TABLE IF NOT EXISTS pipelines (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
-  domain TEXT, cnpj TEXT, city TEXT, uf TEXT, sector TEXT, size TEXT, track TEXT,
-  stage TEXT NOT NULL DEFAULT 'a_contatar',
-  source TEXT, notes TEXT,
-  next_date TEXT, next_action TEXT,
-  close_reason TEXT, close_note TEXT, closed_at TEXT, reactivate_on TEXT,
-  do_not_contact INTEGER NOT NULL DEFAULT 0,
-  reactivated INTEGER NOT NULL DEFAULT 0,
-  rc_hours TEXT NOT NULL DEFAULT '',
-  rc_asked_name INTEGER NOT NULL DEFAULT 0,
-  rc_asked_it INTEGER NOT NULL DEFAULT 0,
-  rc_extension INTEGER NOT NULL DEFAULT 0,
-  rc_whatsapp INTEGER NOT NULL DEFAULT 0,
-  rc_linkedin INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  position REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS accounts_next ON accounts(next_date);
-CREATE INDEX IF NOT EXISTS accounts_domain ON accounts(domain);
-CREATE INDEX IF NOT EXISTS accounts_cnpj ON accounts(cnpj);
 
-CREATE TABLE IF NOT EXISTS contacts (
+CREATE TABLE IF NOT EXISTS stages (
   id INTEGER PRIMARY KEY,
-  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  name TEXT, role TEXT, phone TEXT, email TEXT, channel TEXT,
-  is_primary INTEGER NOT NULL DEFAULT 0
+  pipeline_id INTEGER NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#DDE1E7',
+  position REAL NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS contacts_account ON contacts(account_id);
+CREATE INDEX IF NOT EXISTS stages_pipeline ON stages(pipeline_id, position);
 
-CREATE TABLE IF NOT EXISTS findings (
+CREATE TABLE IF NOT EXISTS origins (
   id INTEGER PRIMARY KEY,
-  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  source TEXT, found_on TEXT, credentials INTEGER, severity TEXT,
-  published INTEGER NOT NULL DEFAULT 0, note TEXT
+  name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#DDE1E7',
+  position REAL NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS findings_account ON findings(account_id);
 
-CREATE TABLE IF NOT EXISTS activities (
+CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
-  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
-  at TEXT NOT NULL, channel TEXT, result TEXT, note TEXT, objection TEXT
+  pipeline_id INTEGER NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+  stage_id INTEGER NOT NULL REFERENCES stages(id),
+  position REAL NOT NULL DEFAULT 0,
+  name TEXT NOT NULL,
+  company TEXT, contact_name TEXT, role TEXT, phone TEXT, email TEXT,
+  domain TEXT, cnpj TEXT, city TEXT, uf TEXT,
+  value REAL,
+  origin_id INTEGER REFERENCES origins(id) ON DELETE SET NULL,
+  notes TEXT,
+  task_date TEXT, task_title TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, stage_changed_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS activities_account ON activities(account_id, at);
-CREATE INDEX IF NOT EXISTS activities_at ON activities(at);
+CREATE INDEX IF NOT EXISTS leads_board ON leads(pipeline_id, stage_id, position);
+CREATE INDEX IF NOT EXISTS leads_task ON leads(task_date);
 
--- Eventos do sistema: mudança de estágio, encerramento, reativação, no-show.
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE IF NOT EXISTS lead_activities (
   id INTEGER PRIMARY KEY,
-  account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  at TEXT NOT NULL, type TEXT NOT NULL,
-  from_stage TEXT, to_stage TEXT, data TEXT
+  lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  at TEXT NOT NULL,
+  type TEXT NOT NULL,
+  note TEXT
 );
-CREATE INDEX IF NOT EXISTS events_account ON events(account_id, at);
-CREATE INDEX IF NOT EXISTS events_type ON events(type, at);
+CREATE INDEX IF NOT EXISTS lead_activities_lead ON lead_activities(lead_id, at);
 `;
 
 function openDb(file) {

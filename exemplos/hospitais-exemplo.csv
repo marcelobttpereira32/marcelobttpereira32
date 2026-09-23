@@ -1,9 +1,9 @@
-Nome do estabelecimento;CNPJ;Município;UF;Site;Telefone;Responsável;Cargo;Setor
-Hospital Santa Clara;11.111.111/0001-11;Curitiba;PR;hsantaclara.com.br;(41) 3333-1001;Marcos Lima;Gerente de TI;Saúde
-Hospital do Vale;22.222.222/0001-22;Joinville;SC;hospitaldovale.org.br;(47) 3444-2002;Carla Souza;Coord. de Infraestrutura;Saúde
-Clínica Bem Estar;33.333.333/0001-33;Londrina;PR;bemestar.med.br;(43) 3555-3003;;;Saúde
-Hospital São Rafael;44.444.444/0001-44;Maringá;PR;saorafael.com.br;(44) 3666-4004;Paulo Reis;Diretor administrativo;Saúde
-Santa Casa de Ponta Grossa;55.555.555/0001-55;Ponta Grossa;PR;santacasapg.org.br;(42) 3777-5005;;;Saúde
-Hospital Municipal Norte;66.666.666/0001-66;Cascavel;PR;;(45) 3888-6006;Recepção;;Governo
-Hospital Santa Clara (filial);11.111.111/0001-11;Curitiba;PR;hsantaclara.com.br;(41) 3333-1099;;;Saúde
-Instituto de Olhos Visão;77.777.777/0001-77;Blumenau;SC;visao.med.br;(47) 3999-7007;Juliana Prado;Sócia;Saúde
+Nome do estabelecimento;CNPJ;Município;UF;Site;Telefone;Responsável;Cargo;Origem;Valor
+Hospital Santa Clara;11.111.111/0001-11;Curitiba;PR;hsantaclara.com.br;(41) 3333-1001;Marcos Lima;Gerente de TI;Vazamento de credenciais (Leak);R$ 3.958,00
+Hospital do Vale;22.222.222/0001-22;Joinville;SC;hospitaldovale.org.br;(47) 3444-2002;Carla Souza;Coord. de Infraestrutura;Ransomware;
+Clínica Bem Estar;33.333.333/0001-33;Londrina;PR;bemestar.med.br;(43) 3555-3003;;;;
+Hospital São Rafael;44.444.444/0001-44;Maringá;PR;saorafael.com.br;(44) 3666-4004;Paulo Reis;Diretor administrativo;LinkedIn;
+Santa Casa de Ponta Grossa;55.555.555/0001-55;Ponta Grossa;PR;santacasapg.org.br;(42) 3777-5005;;;Vazamento de credenciais (Leak);
+Hospital Municipal Norte;66.666.666/0001-66;Cascavel;PR;;(45) 3888-6006;Recepção;;Outra vulnerabilidade;
+Hospital Santa Clara (filial);11.111.111/0001-11;Curitiba;PR;hsantaclara.com.br;(41) 3333-1099;;;;
+Instituto de Olhos Visão;77.777.777/0001-77;Blumenau;SC;visao.med.br;(47) 3999-7007;Juliana Prado;Sócia;LinkedIn;R$ 1.200,00

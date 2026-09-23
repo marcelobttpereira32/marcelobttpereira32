@@ -1,8 +1,8 @@
-/* CRM de prospecção — front-end sem dependências. */
+/* CRM em cards: pipelines, estágios, leads. Sem dependências. */
 (() => {
   'use strict';
-  const L = CRM.L;
   const app = document.getElementById('app');
+  const drawerRoot = document.getElementById('drawer-root');
   const modalRoot = document.getElementById('modal-root');
   const popRoot = document.getElementById('popover-root');
 
@@ -11,964 +11,617 @@
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const store = {
-    get(k, d) { try { const v = localStorage.getItem('crm.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
-    set(k, v) { try { localStorage.setItem('crm.' + k, JSON.stringify(v)); } catch { /* sem storage */ } },
+    get(k, d) { try { const v = localStorage.getItem('crm2.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('crm2.' + k, JSON.stringify(v)); } catch { /* sem storage */ } },
   };
-
   async function api(method, url, body) {
     const res = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Falha na requisição');
     return data;
   }
-
-  function toast(msg, opts = {}) {
-    const el = document.createElement('div');
-    el.className = 't' + (opts.error ? ' err' : '');
-    el.innerHTML = esc(msg) + (opts.link ? ` <a href="${opts.link}">${esc(opts.linkText || 'abrir')}</a>` : '');
+  function toast(msg, error) {
     const box = $('#toast');
     while (box.children.length >= 2) box.firstChild.remove();
+    const el = document.createElement('div');
+    el.className = 't' + (error ? ' err' : '');
+    el.textContent = msg;
     box.appendChild(el);
-    setTimeout(() => el.remove(), opts.error ? 5000 : 3000);
+    setTimeout(() => el.remove(), error ? 5000 : 2600);
   }
-  const fail = (e) => toast(e.message || String(e), { error: true });
+  const fail = (e) => toast(e.message || String(e), true);
 
-  const WD = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
-  function fmtDate(d) {
-    if (!d) return '';
-    const t = CRM.today();
-    const diff = CRM.daysBetween(t, d);
-    if (diff === 0) return 'hoje';
-    if (diff === 1) return 'amanhã';
-    if (diff === -1) return 'ontem';
-    const [y, m, dd] = d.split('-');
-    const base = `${dd}/${m}${y !== t.slice(0, 4) ? '/' + y.slice(2) : ''}`;
-    return diff > 1 && diff < 7 ? `${WD[CRM.parseDate(d).getDay()]} ${base}` : base;
-  }
-  const fmtFull = (d) => (d ? `${WD[CRM.parseDate(d).getDay()]}, ${d.split('-').reverse().join('/')}` : '');
-  function fmtCnpj(c) {
-    const d = String(c || '').replace(/\D/g, '');
-    return d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : c;
-  }
-  function fmtAt(at) {
-    if (!at) return '';
-    return `${fmtDate(at.slice(0, 10))} ${at.slice(11, 16)}`;
-  }
-  function tel(phone) {
-    if (!phone) return '';
-    const n = String(phone).replace(/[^\d+]/g, '');
-    return `<a class="tel" href="tel:${esc(n)}">${esc(phone)}</a>`;
-  }
-  const stageBadge = (s) => `<span class="badge stage-${esc(s)}">${esc(L.stage[s] || s)}</span>`;
-  const place = (r) => [r.city, r.uf].filter(Boolean).join('/');
-  const opts = (list, sel, empty = '—') => `<option value="">${empty}</option>` + list.map(([k, l]) => `<option value="${esc(k)}"${k === sel ? ' selected' : ''}>${esc(l)}</option>`).join('');
-  function lastLine(r) {
-    if (!r.last_at) return '<span class="faint">sem contato registrado</span>';
-    const parts = [fmtAt(r.last_at), L.channel[r.last_channel], L.result[r.last_result]].filter(Boolean).join(' · ');
-    return `<span class="faint">${esc(parts)}</span>${r.last_note ? ' — ' + esc(r.last_note) : ''}`;
-  }
-  function daysChoice() {
-    return [['Amanhã', CRM.plusDays(1)], ['+3 dias', CRM.plusDays(3)], ['+1 semana', CRM.plusDays(7)], ['+2 semanas', CRM.plusDays(14)]];
-  }
-  const isTyping = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+  const money = (v) => BRL.format(v || 0);
+  const fmtDate = (d) => (d ? d.slice(0, 10).split('-').reverse().join('/') : '');
+  const fmtDT = (at) => (at ? `${fmtDate(at)} ${at.slice(11, 16)}` : '');
+  const initials = (s) => String(s || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const digits = (p) => String(p || '').replace(/\D/g, '');
+  const waLink = (p) => { let d = digits(p); if (d.length === 10 || d.length === 11) d = '55' + d; return `https://wa.me/${d}`; };
+  const opts = (list, sel, empty) => (empty !== undefined ? `<option value="">${esc(empty)}</option>` : '') +
+    list.map(([k, l]) => `<option value="${esc(k)}"${String(k) === String(sel ?? '') ? ' selected' : ''}>${esc(l)}</option>`).join('');
+  const isTyping = (el) => el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
 
-  // Navega; se já estiver na rota, apenas re-renderiza.
-  function goTo(hash) { if (location.hash === hash) refresh(); else location.hash = hash; }
+  const I = {
+    phone: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg>',
+    chat: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.6 7.3L3 20.5l1.8-5.2A8.4 8.4 0 1 1 21 11.5z"/></svg>',
+    note: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>',
+    cal: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
+    mail: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>',
+    search: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+    grid: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    list: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+    plus: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+    left: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg>',
+    right: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg>',
+    filter: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M22 3H2l8 9.5V19l4 2v-8.5z"/></svg>',
+    sort: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>',
+    check: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    sys: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+    download: '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16"/></svg>',
+  };
+  const ACT_ICON = { ligacao: I.phone, whatsapp: I.chat, email: I.mail, reuniao: I.cal, nota: I.note, tarefa: I.check, sistema: I.sys };
+  const ACT_LABEL = Object.fromEntries([...CRM.ACTIVITY_TYPES, ['tarefa', 'Tarefa'], ['sistema', 'Movimentação']]);
 
   // ---------- estado ----------
   const state = {
-    view: null, rows: [], sel: -1, account: null,
-    filters: store.get('filters', {}), sort: store.get('sort', { key: 'next_date', dir: 'asc' }),
-    checked: new Set(), metrics: store.get('metrics', { preset: '30' }),
-    importData: null,
+    meta: null, leads: [],
+    pipelineId: store.get('pipeline', null),
+    view: store.get('view', 'board'),
+    q: '', origins: new Set(store.get('origins', [])), task: store.get('task', ''), sort: store.get('sort', 'position'),
+    collapsed: new Set(store.get('collapsed', [])), shown: {}, checked: new Set(), settingsPipe: null, importData: null,
   };
+  const SORTS = [['position', 'Manual (arrastar)', 'asc'], ['updated', 'Atualizado recentemente', 'desc'], ['created', 'Criado recentemente', 'desc'],
+    ['name', 'Nome (A–Z)', 'asc'], ['value', 'Maior valor', 'desc'], ['task', 'Próximo passo mais próximo', 'asc'],
+    // Só pela lista (clique no cabeçalho).
+    ['stage', 'Estágio', 'asc', true], ['contact', 'Contato (A–Z)', 'asc', true], ['origin', 'Origem', 'asc', true]];
+  const TASKS = [['', 'Todos'], ['overdue', 'Próximo passo atrasado'], ['today', 'Próximo passo hoje'], ['none', 'Sem próximo passo']];
+  const PAGE = 60;
+
+  const pipe = () => state.meta.pipelines.find((p) => p.id === state.pipelineId) || state.meta.pipelines[0];
+  const originOf = (id) => state.meta.origins.find((o) => o.id === id);
+  const stageOf = (id) => { for (const p of state.meta.pipelines) { const s = p.stages.find((x) => x.id === id); if (s) return s; } return null; };
+  const originTag = (id) => { const o = originOf(id); return o ? `<span class="tag" style="background:${o.color}" title="Origem">${esc(o.name)}</span>` : ''; };
+
+  async function loadMeta() {
+    state.meta = await api('GET', '/api/meta');
+    if (!state.meta.pipelines.some((p) => p.id === state.pipelineId)) state.pipelineId = state.meta.pipelines[0].id;
+    const valid = new Set(state.meta.origins.map((o) => String(o.id)).concat('none'));
+    state.origins = new Set([...state.origins].filter((o) => valid.has(String(o))));
+  }
 
   // ---------- modal e popover ----------
-  let modalKey = null;
-  function openModal(html, { onKey, wide, onClose } = {}) {
+  function openModal(html, onClose) {
     closePopover();
-    modalRoot.innerHTML = `<div class="modal-bg"><div class="modal${wide ? ' wide' : ''}" tabindex="-1" role="dialog" aria-modal="true">${html}</div></div>`;
-    const m = $('.modal', modalRoot);
+    modalRoot.innerHTML = `<div class="modal-bg"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
     modalRoot.firstChild.addEventListener('mousedown', (e) => { if (e.target === modalRoot.firstChild) closeModal(); });
-    modalKey = { onKey, onClose };
-    m.focus();
-    return m;
+    modalRoot._onClose = onClose;
+    return $('.modal', modalRoot);
   }
-  function closeModal() {
-    const cb = modalKey && modalKey.onClose;
-    modalRoot.innerHTML = ''; modalKey = null;
-    if (cb) cb();
-  }
-  const modalOpen = () => !!modalRoot.firstChild;
-
-  let popKey = null;
-  function openPopover(anchor, html, onKey) {
+  function closeModal() { const cb = modalRoot._onClose; modalRoot.innerHTML = ''; modalRoot._onClose = null; if (cb) cb(); }
+  function openPopover(anchor, html) {
     closePopover();
     const r = anchor.getBoundingClientRect();
-    popRoot.innerHTML = `<div class="popover" tabindex="-1">${html}</div>`;
+    popRoot.innerHTML = `<div class="popover">${html}</div>`;
     const p = popRoot.firstChild;
-    const left = Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 190);
-    p.style.left = Math.max(8, left) + 'px';
-    p.style.top = (window.scrollY + r.bottom + 4) + 'px';
-    popKey = onKey;
-    (p.querySelector('button') || p).focus();
+    p.style.top = (window.scrollY + r.bottom + 6) + 'px';
+    p.style.left = Math.max(8, Math.min(window.scrollX + r.left, window.scrollX + document.documentElement.clientWidth - 250)) + 'px';
     return p;
   }
-  function closePopover() { popRoot.innerHTML = ''; popKey = null; }
-  document.addEventListener('mousedown', (e) => { if (popRoot.firstChild && !popRoot.contains(e.target)) closePopover(); });
-
-  // ---------- componentes compartilhados ----------
-
-  // Editor de próximo passo: data com atalhos + ação.
-  function nextEditorHtml(date, action, prefix = 'n') {
-    return `<div class="next-edit">
-      <input type="date" id="${prefix}-date" value="${esc(date || '')}" required>
-      <span class="chips">${daysChoice().map(([l, d], i) => `<button type="button" class="chip" data-setdate="${d}" data-target="${prefix}">${l}</button>`).join('')}</span>
-    </div>
-    <input type="text" id="${prefix}-action" class="note" value="${esc(action || '')}" placeholder="Ação combinada (ex.: ligar para o TI às 10h)" style="margin-top:6px">`;
-  }
-  function bindNextEditor(m, prefix = 'n', onManual) {
-    $$(`[data-setdate][data-target="${prefix}"]`, m).forEach((b) => b.addEventListener('click', () => {
-      $(`#${prefix}-date`, m).value = b.dataset.setdate; if (onManual) onManual('date');
-    }));
-    $(`#${prefix}-date`, m).addEventListener('input', () => onManual && onManual('date'));
-    $(`#${prefix}-action`, m).addEventListener('input', () => onManual && onManual('action'));
-  }
-  const readNext = (m, prefix = 'n') => ({ date: $(`#${prefix}-date`, m).value, action: $(`#${prefix}-action`, m).value.trim() });
-
-  // Bloco de encerramento com motivo. O motivo decide se a conta volta.
-  function closeBoxHtml(reason) {
-    return `<div class="close-box" id="close-box">
-      <div class="chips">${CRM.CLOSE_REASONS.map(([k, l, info]) => `<button type="button" class="chip${k === reason ? ' on' : ''}" data-reason="${k}">${esc(l)}
-        <span class="faint">· ${info.never ? 'nunca mais' : info.days ? `volta em ${info.days}d` : 'não volta'}</span></button>`).join('')}</div>
-      <div id="close-note-wrap" ${reason === 'mal_conduzida' ? '' : 'hidden'}>
-        <div class="field"><span style="color:var(--red);font-weight:600">O que deu errado?</span>
-        <textarea id="close-note" rows="2" placeholder="Vai aparecer em destaque quando a conta voltar para a fila"></textarea></div>
-      </div>
-      <div class="muted" id="close-info"></div>
-    </div>`;
-  }
-  function bindCloseBox(m, initial, onChange) {
-    let reason = initial || null;
-    const info = () => {
-      const i = CRM.reasonInfo(reason);
-      $('#close-info', m).textContent = !i ? 'Escolha um motivo.' : i.never ? 'Sai de qualquer reativação futura, em definitivo.'
-        : i.days ? `Volta para a fila em ${fmtFull(CRM.plusDays(i.days))}, com histórico e motivo visíveis.` : 'Não volta para a fila.';
-    };
-    $$('[data-reason]', m).forEach((b) => b.addEventListener('click', () => {
-      reason = b.dataset.reason;
-      $$('[data-reason]', m).forEach((x) => x.classList.toggle('on', x === b));
-      $('#close-note-wrap', m).hidden = reason !== 'mal_conduzida';
-      if (reason === 'mal_conduzida') $('#close-note', m).focus();
-      info(); if (onChange) onChange(reason);
-    }));
-    info();
-    return { get: () => (reason ? { reason, note: ($('#close-note', m) || {}).value || '' } : null) };
-  }
-
-  // ---------- caixa rápida: registrar contato ----------
-  // Um clique no canal, um no resultado, uma frase, Enter. Próximo passo já vem sugerido.
-  function openLog(acc, after) {
-    const active = CRM.ACTIVE_STAGES.includes(acc.stage);
-    let channel = store.get('lastChannel', 'ligacao');
-    let result = null; let objection = null; let mode = 'next';
-    const touched = { date: false, action: false };
-    const contacts = acc.contacts || (acc.contact_id ? [{ id: acc.contact_id, name: acc.contact_name, phone: acc.contact_phone, is_primary: 1 }] : []);
-    const m = openModal(`
-      <div class="modal-h"><h2>Registrar contato</h2><span class="muted">${esc(acc.name)}</span><span class="spacer"></span><kbd>Esc</kbd></div>
-      <div class="modal-b">
-        <div class="row-l"><span class="l">Canal</span><div class="chips" id="ch">${CRM.CHANNELS.map(([k, l]) => `<button type="button" class="chip${k === channel ? ' on' : ''}" data-ch="${k}"><span class="k">${l[0].toLowerCase() === 'l' && k === 'linkedin' ? 'i' : l[0].toLowerCase()}</span>${l}</button>`).join('')}</div></div>
-        <div class="row-l"><span class="l">Resultado</span><div class="chips" id="rs">${CRM.RESULTS.map(([k, l], i) => `<button type="button" class="chip" data-rs="${k}"><span class="k">${i + 1}</span>${l}</button>`).join('')}</div></div>
-        ${contacts.length > 1 ? `<div class="row-l"><span class="l">Com quem</span><select id="log-contact">${contacts.map((c) => `<option value="${c.id}"${c.is_primary ? ' selected' : ''}>${esc(c.name || 'sem nome')}${c.role ? ' · ' + esc(c.role) : ''}</option>`).join('')}</select></div>` : ''}
-        <div class="row-l"><span class="l">Anotação</span><input type="text" id="log-note" class="note" placeholder="Uma frase sobre o que foi dito (opcional)"></div>
-        <div class="row-l"><span class="l">Objeção</span><div class="chips" id="ob">${CRM.OBJECTIONS.map(([k, l]) => `<button type="button" class="chip" data-ob="${k}">${l}</button>`).join('')}</div></div>
-        ${active ? `
-        <div class="row-l"><span class="l">Próximo passo</span>
-          <div>
-            <div id="next-wrap">${nextEditorHtml(CRM.plusDays(1), 'Ligar de novo')}</div>
-            <div id="close-wrap" hidden>${closeBoxHtml(null)}</div>
-            <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <button type="button" class="btn link" id="toggle-close">Encerrar a conta em vez disso</button>
-              <span id="obj-hint"></span>
-            </div>
-          </div>
-        </div>` : `<div class="muted">Conta ${esc(L.stage[acc.stage].toLowerCase())}: o registro fica no histórico e não mexe na fila.</div>`}
-        <div class="err" id="log-err"></div>
-      </div>
-      <div class="modal-f"><span class="faint hint-kbd" style="font-size:12px">1–5 resultado · l w e i p canal · Enter salva</span><span class="spacer"></span>
-        <button class="btn" data-x>Cancelar</button><button class="btn primary" id="log-save">Salvar <kbd>⏎</kbd></button></div>`, {
-      onKey(e) {
-        const el = document.activeElement;
-        const typing = isTyping(el);
-        if (e.key === 'Enter') {
-          const mod = e.ctrlKey || e.metaKey;
-          if (!mod && (el.tagName === 'TEXTAREA' || (el.tagName === 'BUTTON' && !el.classList.contains('chip')))) return false;
-          e.preventDefault(); save(); return true;
-        }
-        if (typing) return false;
-        if (/^[1-5]$/.test(e.key)) { pickResult(CRM.RESULTS[Number(e.key) - 1][0]); e.preventDefault(); return true; }
-        const chKey = { l: 'ligacao', w: 'whatsapp', e: 'email', i: 'linkedin', p: 'presencial' }[e.key];
-        if (chKey) { pickChannel(chKey); e.preventDefault(); return true; }
-        return false;
-      },
-    });
-    const closeBox = active ? bindCloseBox(m, null) : null;
-    if (active) bindNextEditor(m, 'n', (k) => { touched[k] = true; });
-
-    function pickChannel(k) { channel = k; $$('[data-ch]', m).forEach((b) => b.classList.toggle('on', b.dataset.ch === k)); }
-    function pickResult(k) {
-      result = result === k ? null : k;
-      $$('[data-rs]', m).forEach((b) => b.classList.toggle('on', b.dataset.rs === result));
-      if (active && result) {
-        const info = CRM.resultInfo(result);
-        if (!touched.date) $('#n-date', m).value = CRM.plusDays(info.days);
-        if (!touched.action) $('#n-action', m).value = info.action;
-      }
-      $('#log-note', m).focus();
-    }
-    function setMode(md) {
-      mode = md;
-      $('#next-wrap', m).hidden = md !== 'next';
-      $('#close-wrap', m).hidden = md !== 'close';
-      $('#toggle-close', m).textContent = md === 'next' ? 'Encerrar a conta em vez disso' : 'Voltar: definir próximo passo';
-    }
-    $$('[data-ch]', m).forEach((b) => b.addEventListener('click', () => pickChannel(b.dataset.ch)));
-    $$('[data-rs]', m).forEach((b) => b.addEventListener('click', () => pickResult(b.dataset.rs)));
-    $$('[data-ob]', m).forEach((b) => b.addEventListener('click', () => {
-      objection = objection === b.dataset.ob ? null : b.dataset.ob;
-      $$('[data-ob]', m).forEach((x) => x.classList.toggle('on', x.dataset.ob === objection));
-      if (!active) return;
-      const r = CRM.OBJECTION_TO_REASON[objection];
-      const hint = $('#obj-hint', m);
-      hint.innerHTML = r ? `<button type="button" class="btn sm" id="use-reason">Encerrar: ${esc(L.reason[r])} · volta em ${CRM.reasonInfo(r).days}d</button>` : '';
-      if (r) $('#use-reason', m).addEventListener('click', () => { setMode('close'); $(`[data-reason="${r}"]`, m).click(); });
-    }));
-    if (active) $('#toggle-close', m).addEventListener('click', () => setMode(mode === 'next' ? 'close' : 'next'));
-    $('[data-x]', m).addEventListener('click', closeModal);
-    $('#log-save', m).addEventListener('click', save);
-
-    let saving = false;
-    async function save() {
-      if (saving) return;
-      const body = { channel, result, objection, note: $('#log-note', m).value.trim() };
-      const sel = $('#log-contact', m);
-      body.contact_id = sel ? Number(sel.value) : (contacts[0] && contacts[0].id) || null;
-      if (active) {
-        if (mode === 'close') {
-          body.close = closeBox.get();
-          if (!body.close) { $('#log-err', m).textContent = 'Escolha o motivo do encerramento.'; return; }
-        } else {
-          body.next = readNext(m);
-          if (!body.next.date) { $('#log-err', m).textContent = 'Defina a data do próximo passo (ou encerre a conta).'; $('#n-date', m).focus(); return; }
-        }
-      }
-      saving = true;
-      try {
-        const r = await api('POST', `/api/accounts/${acc.id}/activities`, body);
-        store.set('lastChannel', channel);
-        closeModal();
-        toast(body.close ? 'Registrado e encerrado' : `Registrado · próximo passo ${fmtDate(body.next ? body.next.date : '')}`);
-        if (r.suggest_reception) suggestReception(r.account);
-        else if (after) after(r.account);
-      } catch (e) { saving = false; $('#log-err', m).textContent = e.message; }
-    }
-  }
-
-  // Escalada na recepção: depois da 3ª tentativa sem decisor.
-  function suggestReception(acc) {
-    const m = openModal(`
-      <div class="modal-h"><h2>${acc.attempts_without_decisor} tentativas sem falar com o decisor</h2></div>
-      <div class="modal-b"><div><b>${esc(acc.name)}</b> ainda não passou do filtro. Mover para <b>Travado na recepção</b> e ver os ângulos que ainda não foram tentados?</div></div>
-      <div class="modal-f"><span class="spacer"></span><button class="btn" data-x>Agora não</button><button class="btn primary" id="go">Mover <kbd>⏎</kbd></button></div>`, {
-      onKey(e) { if (e.key === 'Enter') { e.preventDefault(); go(); return true; } return false; },
-      onClose: () => refresh(),
-    });
-    $('[data-x]', m).addEventListener('click', closeModal);
-    $('#go', m).addEventListener('click', go);
-    async function go() {
-      try {
-        await api('PATCH', `/api/accounts/${acc.id}`, { stage: 'travado' });
-        modalKey.onClose = null; closeModal();
-        goTo(`#/conta/${acc.id}`);
-      } catch (e) { fail(e); }
-    }
-  }
-
-  // ---------- próximo passo: definir, concluir, adiar ----------
-  function openNextStep(acc, { complete = false, title, action } = {}, after) {
-    let mode = 'next';
-    const m = openModal(`
-      <div class="modal-h"><h2>${title || (complete ? 'Concluir próximo passo' : 'Próximo passo')}</h2><span class="muted">${esc(acc.name)}</span></div>
-      <div class="modal-b">
-        ${complete && acc.next_action ? `<div class="muted">Concluído: <span style="text-decoration:line-through">${esc(acc.next_action)}</span></div><div class="strong">E agora, qual o próximo?</div>` : ''}
-        <div id="next-wrap">${nextEditorHtml(complete || !acc.next_date ? CRM.plusDays(1) : acc.next_date, action ?? (complete ? '' : acc.next_action || ''))}</div>
-        ${complete ? `<div id="close-wrap" hidden>${closeBoxHtml(null)}</div><div><button type="button" class="btn link" id="toggle-close">Encerrar a conta em vez disso</button></div>` : ''}
-        <div class="err" id="ns-err"></div>
-      </div>
-      <div class="modal-f"><span class="spacer"></span><button class="btn" data-x>Cancelar</button><button class="btn primary" id="ns-save">Salvar <kbd>⏎</kbd></button></div>`, {
-      onKey(e) {
-        if (e.key === 'Enter' && document.activeElement.tagName !== 'BUTTON' && document.activeElement.tagName !== 'TEXTAREA') { e.preventDefault(); save(); return true; }
-        return false;
-      },
-    });
-    bindNextEditor(m);
-    const closeBox = complete ? bindCloseBox(m, null) : null;
-    if (complete) $('#toggle-close', m).addEventListener('click', () => {
-      mode = mode === 'next' ? 'close' : 'next';
-      $('#next-wrap', m).hidden = mode !== 'next'; $('#close-wrap', m).hidden = mode !== 'close';
-      $('#toggle-close', m).textContent = mode === 'next' ? 'Encerrar a conta em vez disso' : 'Voltar: definir próximo passo';
-    });
-    $('#n-action', m).focus();
-    $('[data-x]', m).addEventListener('click', closeModal);
-    $('#ns-save', m).addEventListener('click', save);
-    async function save() {
-      try {
-        let r;
-        if (mode === 'close') {
-          const c = closeBox.get();
-          if (!c) { $('#ns-err', m).textContent = 'Escolha o motivo do encerramento.'; return; }
-          r = await api('POST', `/api/accounts/${acc.id}/complete-step`, { close: c });
-        } else {
-          const n = readNext(m);
-          if (!n.date) { $('#ns-err', m).textContent = 'Defina a data.'; return; }
-          if (after && after.custom) { closeModal(); return after.custom(n); }
-          r = await api('POST', `/api/accounts/${acc.id}/${complete ? 'complete-step' : 'next-step'}`, complete ? { next: n } : n);
-        }
-        closeModal(); toast('Próximo passo salvo'); (after || refresh)(r);
-      } catch (e) { $('#ns-err', m).textContent = e.message; }
-    }
-  }
-
-  function openPostpone(acc, anchor, after) {
-    const choices = [['1 dia', 1, '1'], ['3 dias', 3, '3'], ['1 semana', 7, '7']];
-    const p = openPopover(anchor, choices.map(([l, d, k]) => `<button data-days="${d}">${l}<kbd>${k}</kbd></button>`).join('') +
-      `<input type="date" id="pp-date" aria-label="Escolher data">`, (e) => {
-      const c = choices.find((x) => x[2] === e.key);
-      if (c) { e.preventDefault(); go({ days: c[1] }); return true; }
-      return false;
-    });
-    $$('[data-days]', p).forEach((b) => b.addEventListener('click', () => go({ days: Number(b.dataset.days) })));
-    $('#pp-date', p).addEventListener('change', (e) => e.target.value && go({ date: e.target.value }));
-    async function go(body) {
-      closePopover();
-      try { const r = await api('POST', `/api/accounts/${acc.id}/postpone`, body); toast(`Adiado para ${fmtDate(r.next_date)}`); (after || refresh)(r); } catch (e) { fail(e); }
-    }
-  }
-
-  function openClose(acc, after) {
-    const m = openModal(`
-      <div class="modal-h"><h2>Encerrar conta</h2><span class="muted">${esc(acc.name)}</span></div>
-      <div class="modal-b">${closeBoxHtml(null)}<div class="err" id="c-err"></div></div>
-      <div class="modal-f"><span class="spacer"></span><button class="btn" data-x>Cancelar</button><button class="btn primary" id="c-save">Encerrar</button></div>`);
-    const box = bindCloseBox(m, null);
-    $('[data-x]', m).addEventListener('click', closeModal);
-    $('#c-save', m).addEventListener('click', async () => {
-      const c = box.get();
-      if (!c) { $('#c-err', m).textContent = 'Escolha um motivo.'; return; }
-      try { const r = await api('POST', `/api/accounts/${acc.id}/close`, c); closeModal(); toast('Conta encerrada'); (after || refresh)(r); } catch (e) { $('#c-err', m).textContent = e.message; }
-    });
-  }
-
-  // Mudança de estágio pela ficha: pede o que a regra exigir.
-  async function changeStage(acc, stage, after) {
-    if (stage === acc.stage) return;
-    if (stage === 'encerrado') return openClose(acc, after);
-    let force = false;
-    if (acc.do_not_contact) {
-      if (!confirm('Esta conta pediu para não ser contatada. Reabrir mesmo assim?')) return (after || refresh)();
-      force = true;
-    }
-    const needsNext = CRM.ACTIVE_STAGES.includes(stage) && (!acc.next_date || acc.stage === 'encerrado' || stage === 'reuniao');
-    const doPatch = async (next) => {
-      try { const r = await api('PATCH', `/api/accounts/${acc.id}`, { stage, next, force }); toast(`Estágio: ${L.stage[stage]}`); (after || refresh)(r); } catch (e) { fail(e); (after || refresh)(); }
-    };
-    if (!needsNext) return doPatch(undefined);
-    openNextStep({ ...acc, next_date: null }, {
-      title: stage === 'reuniao' ? 'Reunião agendada: quando?' : `Mover para ${L.stage[stage]}`,
-      action: stage === 'reuniao' ? 'Reunião com o closer' : acc.stage === 'encerrado' ? 'Retomar contato' : '',
-    }, { custom: doPatch });
-    modalKey.onClose = () => { if (after) after(); else refresh(); };
-  }
-
-  // ---------- formulários de conta, contato, achado ----------
-  function openAccountForm(acc, after) {
-    const m = openModal(`
-      <div class="modal-h"><h2>${acc ? 'Editar conta' : 'Nova conta'}</h2></div>
-      <form class="modal-b" id="af">
-        <div class="form-grid">
-          <label class="full">Nome<input type="text" name="name" value="${esc(acc && acc.name)}" required></label>
-          <label>Site ou domínio<input type="text" name="domain" value="${esc(acc && acc.domain)}"></label>
-          <label>CNPJ<input type="text" name="cnpj" value="${esc(acc && acc.cnpj)}" inputmode="numeric"></label>
-          <label>Cidade<input type="text" name="city" value="${esc(acc && acc.city)}"></label>
-          <label>UF<select name="uf">${opts(CRM.UFS.map((u) => [u, u]), acc && acc.uf)}</select></label>
-          <label>Setor<select name="sector">${opts(CRM.SECTORS, acc && acc.sector)}</select></label>
-          <label>Porte (funcionários)<select name="size">${opts(CRM.SIZES, acc && acc.size)}</select></label>
-          <label>Trilha<select name="track">${opts(CRM.TRACKS, acc && acc.track)}</select></label>
-          <label>Origem da lista<input type="text" name="source" value="${esc(acc && acc.source)}" list="sources"></label>
-          <label class="full">Observação<textarea name="notes" rows="3">${esc(acc && acc.notes)}</textarea></label>
-        </div>
-        <datalist id="sources">${['e-MEC', 'CNES', 'ransomware.live', 'LeakRadar', 'indicação', 'associação'].map((s) => `<option value="${s}">`).join('')}</datalist>
-        <div class="err" id="af-err"></div>
-      </form>
-      <div class="modal-f">${acc ? '<button class="btn danger" id="af-del">Excluir conta</button>' : ''}<span class="spacer"></span><button class="btn" data-x>Cancelar</button><button class="btn primary" id="af-save">Salvar</button></div>`, { wide: true });
-    $('[name=name]', m).focus();
-    $('[data-x]', m).addEventListener('click', closeModal);
-    const save = async (e) => {
-      if (e) e.preventDefault();
-      const body = Object.fromEntries(new FormData($('#af', m)));
-      try {
-        const r = acc ? await api('PATCH', `/api/accounts/${acc.id}`, body) : await api('POST', '/api/accounts', body);
-        closeModal(); toast('Conta salva');
-        if (!acc) location.hash = `#/conta/${r.id}`; else (after || refresh)(r);
-      } catch (err) { $('#af-err', m).textContent = err.message; }
-    };
-    $('#af', m).addEventListener('submit', save);
-    $('#af-save', m).addEventListener('click', save);
-    if (acc) $('#af-del', m).addEventListener('click', async () => {
-      if (!confirm(`Excluir "${acc.name}" e todo o histórico? Não dá para desfazer.`)) return;
-      try { await api('DELETE', `/api/accounts/${acc.id}`); closeModal(); toast('Conta excluída'); location.hash = '#/contas'; } catch (err) { fail(err); }
-    });
-  }
-
-  function openContactForm(acc, c, after) {
-    const m = openModal(`
-      <div class="modal-h"><h2>${c ? 'Editar contato' : 'Novo contato'}</h2><span class="muted">${esc(acc.name)}</span></div>
-      <form class="modal-b" id="cf">
-        <div class="form-grid">
-          <label>Nome<input type="text" name="name" value="${esc(c && c.name)}"></label>
-          <label>Cargo<input type="text" name="role" value="${esc(c && c.role)}"></label>
-          <label>Telefone<input type="tel" name="phone" value="${esc(c && c.phone)}"></label>
-          <label>E-mail<input type="email" name="email" value="${esc(c && c.email)}"></label>
-          <label>Canal preferido<select name="channel">${opts(CRM.CHANNELS, c && c.channel)}</select></label>
-          <label class="check" style="flex-direction:row;align-self:end"><input type="checkbox" name="is_primary" ${!c || c.is_primary ? 'checked' : ''}> Contato principal</label>
-        </div>
-        <div class="err" id="cf-err"></div>
-      </form>
-      <div class="modal-f">${c ? '<button class="btn danger" id="cf-del">Excluir</button>' : ''}<span class="spacer"></span><button class="btn" data-x>Cancelar</button><button class="btn primary" id="cf-save">Salvar</button></div>`);
-    $('[name=name]', m).focus();
-    $('[data-x]', m).addEventListener('click', closeModal);
-    const save = async (e) => {
-      if (e) e.preventDefault();
-      const f = $('#cf', m);
-      const body = Object.fromEntries(new FormData(f));
-      body.is_primary = f.is_primary.checked;
-      try {
-        const r = c ? await api('PATCH', `/api/contacts/${c.id}`, body) : await api('POST', `/api/accounts/${acc.id}/contacts`, body);
-        closeModal(); (after || refresh)(r);
-      } catch (err) { $('#cf-err', m).textContent = err.message; }
-    };
-    $('#cf', m).addEventListener('submit', save);
-    $('#cf-save', m).addEventListener('click', save);
-    if (c) $('#cf-del', m).addEventListener('click', async () => {
-      if (!confirm('Excluir este contato?')) return;
-      try { const r = await api('DELETE', `/api/contacts/${c.id}`); closeModal(); (after || refresh)(r); } catch (err) { fail(err); }
-    });
-  }
-
-  function openFindingForm(acc, f, after) {
-    const m = openModal(`
-      <div class="modal-h"><h2>${f ? 'Editar achado' : 'Novo achado'}</h2><span class="muted">${esc(acc.name)}</span></div>
-      <form class="modal-b" id="ff">
-        <div class="form-grid">
-          <label>Fonte<input type="text" name="source" value="${esc(f && f.source)}" placeholder="LeakRadar, ransomware.live…"></label>
-          <label>Data em que apareceu<input type="date" name="found_on" value="${esc(f ? f.found_on : CRM.today())}"></label>
-          <label>Credenciais<input type="number" name="credentials" min="0" value="${esc(f && f.credentials)}"></label>
-          <label>Gravidade<select name="severity">${opts(CRM.SEVERITIES, f && f.severity)}</select></label>
-          <label class="check" style="flex-direction:row;align-self:end"><input type="checkbox" name="published" ${f && f.published ? 'checked' : ''}> Já foi publicado</label>
-          <label class="full">Observação do analista<textarea name="note" rows="3">${esc(f && f.note)}</textarea></label>
-        </div>
-        <div class="err" id="ff-err"></div>
-      </form>
-      <div class="modal-f">${f ? '<button class="btn danger" id="ff-del">Excluir</button>' : ''}<span class="spacer"></span><button class="btn" data-x>Cancelar</button><button class="btn primary" id="ff-save">Salvar</button></div>`);
-    $('[name=source]', m).focus();
-    $('[data-x]', m).addEventListener('click', closeModal);
-    const save = async (e) => {
-      if (e) e.preventDefault();
-      const form = $('#ff', m);
-      const body = Object.fromEntries(new FormData(form));
-      body.published = form.published.checked;
-      try {
-        const r = f ? await api('PATCH', `/api/findings/${f.id}`, body) : await api('POST', `/api/accounts/${acc.id}/findings`, body);
-        closeModal(); (after || refresh)(r);
-      } catch (err) { $('#ff-err', m).textContent = err.message; }
-    };
-    $('#ff', m).addEventListener('submit', save);
-    $('#ff-save', m).addEventListener('click', save);
-    if (f) $('#ff-del', m).addEventListener('click', async () => {
-      if (!confirm('Excluir este achado?')) return;
-      try { const r = await api('DELETE', `/api/findings/${f.id}`); closeModal(); (after || refresh)(r); } catch (err) { fail(err); }
-    });
-  }
+  function closePopover() { popRoot.innerHTML = ''; }
+  document.addEventListener('mousedown', (e) => { if (popRoot.firstChild && !popRoot.contains(e.target) && !e.target.closest('[data-pop]')) closePopover(); });
 
   // =====================================================================
-  // Tela 1 — Hoje
+  // Oportunidades: quadro e lista
   // =====================================================================
-  async function renderHoje() {
-    const d = await api('GET', '/api/today');
-    const groups = [
-      ['overdue', 'Atrasados', d.overdue, 'Nada atrasado.'],
-      ['due', 'Hoje', d.due, 'Nada marcado para hoje.'],
-      ['orphans', 'Sem próximo passo', d.orphans, 'Nenhuma conta órfã.'],
-    ];
-    state.rows = [...d.overdue, ...d.due, ...d.orphans];
-    if (state.sel >= state.rows.length) state.sel = state.rows.length - 1;
-    if (state.sel < 0 && state.rows.length) state.sel = 0;
-    let i = 0;
-    app.innerHTML = `
-      <div class="today-head">
-        <h1>Para quem ligar agora</h1>
-        <span class="counters"><b class="num">${d.counters.calls_today}</b> ligações hoje · <b class="num">${d.counters.meetings_week}</b> reuniões marcadas na semana</span>
-      </div>
-      ${groups.map(([k, title, rows, empty]) => `
-        <section class="group ${k}">
-          <header class="group-h"><h2>${title}</h2><span class="n">${rows.length}</span></header>
-          ${rows.length ? rows.map((r) => queueRow(r, i++, k)).join('') : `<div class="card empty">${empty}</div>`}
-        </section>`).join('')}
-      ${!state.rows.length ? '<p class="muted">Fila vazia. Cadastre uma conta no campo do topo ou importe uma planilha em <a href="#/importar">Importar</a>.</p>' : ''}`;
-    bindRows();
-    highlight();
-  }
-
-  function queueRow(r, i, group) {
-    const overdueDays = r.next_date && group === 'overdue' ? CRM.daysBetween(r.next_date, CRM.today()) : 0;
-    const alert = r.reactivated ? `<div class="alert"><b>Voltou para a fila</b> · encerrada antes por “${esc(L.reason[r.close_reason] || '')}”${r.close_note ? ` — <b>o que deu errado:</b> ${esc(r.close_note)}` : ''}</div>` : '';
-    return `<div class="qrow" data-i="${i}" data-id="${r.id}">
-      <div class="c-main"><a class="name" href="#/conta/${r.id}">${esc(r.name)}</a>
-        <div class="sub">${esc([place(r), L.track[r.track]].filter(Boolean).join(' · ') || '—')} ${r.stage === 'travado' ? stageBadge('travado') : ''}
-        ${r.findings_count ? `<span class="badge${r.finding_stale ? ' warn' : ''}" title="Achado de vazamento${r.finding_stale ? ' com mais de 30 dias' : ''}">achado${r.finding_stale ? ' +30d' : ''}</span>` : ''}</div></div>
-      <div class="c-contact">${r.contact_name ? esc(r.contact_name) : '<span class="faint">sem contato</span>'}<div class="sub">${tel(r.contact_phone) || '<span class="faint">sem telefone</span>'}</div></div>
-      <div class="c-next">${group === 'orphans' ? `<span class="overdue-text">sem próximo passo</span><div class="sub">há ${r.orphan_days} dia(s)${r.orphan_days > CRM.ORPHAN_DAYS ? ' · esquecida' : ''}</div>`
-        : `<span class="date-chip${overdueDays ? ' overdue-text' : ''}">${overdueDays ? `${fmtDate(r.next_date)} · ${overdueDays}d` : 'hoje'}</span>${esc(r.next_action || '')}`}</div>
-      <div class="c-last">${lastLine(r)}</div>
-      <div class="acts">
-        <button class="btn primary sm" data-act="log" title="Registrar contato (R)">Registrar</button>
-        ${group === 'orphans' ? '<button class="btn sm" data-act="next" title="Definir próximo passo (P)">Próximo passo</button>' : '<button class="btn sm" data-act="postpone" title="Adiar (A)">Adiar</button>'}
-        <a class="btn sm" href="#/conta/${r.id}" title="Abrir ficha (Enter)">Ficha</a>
-      </div>
-      ${alert}
-    </div>`;
-  }
-
-  function bindRows() {
-    $$('.qrow', app).forEach((row) => {
-      const r = state.rows[Number(row.dataset.i)];
-      row.addEventListener('click', (e) => {
-        state.sel = Number(row.dataset.i); highlight(false);
-        const b = e.target.closest('[data-act]');
-        if (!b) return;
-        rowAction(b.dataset.act, r, b);
-      });
-    });
-  }
-  function rowAction(act, r, anchor) {
-    if (!r) return;
-    if (act === 'log') openLog(r, () => refresh());
-    else if (act === 'postpone') openPostpone(r, anchor || $(`.qrow[data-id="${r.id}"] [data-act="postpone"]`) || $(`.qrow[data-id="${r.id}"]`));
-    else if (act === 'next') openNextStep(r);
-    else if (act === 'open') location.hash = `#/conta/${r.id}`;
-  }
-  function highlight(scroll = true) {
-    $$('[data-i]', app).forEach((el) => el.classList.toggle('sel', Number(el.dataset.i) === state.sel));
-    const el = $(`[data-i="${state.sel}"]`, app);
-    if (el && scroll) el.scrollIntoView({ block: 'nearest' });
-  }
-
-  // =====================================================================
-  // Tela 2 — Contas
-  // =====================================================================
-  const PRESETS = [['travado', 'Travado na recepção'], ['reativar_mes', 'Reativar este mês']];
-  const COLS = [['name', 'Conta'], ['city', 'Cidade/UF'], ['sector', 'Setor'], ['track', 'Trilha'], ['stage', 'Estágio'], ['contact', 'Contato'], ['phone', 'Telefone'], ['last_at', 'Último contato'], ['next_date', 'Próximo passo']];
-
-  function filterQuery() {
-    const f = state.filters; const q = new URLSearchParams();
-    for (const k of ['track', 'stage', 'sector', 'uf', 'reason']) if (f[k] && f[k].length) q.set(k, f[k].join(','));
-    if (f.q) q.set('q', f.q);
-    if (f.finding) q.set('finding', f.finding);
-    if (f.stale) q.set('stale', f.stale);
-    if (f.preset) q.set('preset', f.preset);
-    q.set('sort', state.sort.key); q.set('dir', state.sort.dir);
+  function leadsQuery() {
+    const s = SORTS.find((x) => x[0] === state.sort) || SORTS[0];
+    const q = new URLSearchParams({ pipeline: pipe().id, sort: s[0], dir: s[2] });
+    if (state.q) q.set('q', state.q);
+    if (state.origins.size) q.set('origin', [...state.origins].join(','));
+    if (state.task) q.set('task', state.task);
     return q.toString();
   }
+  async function loadLeads() { state.leads = await api('GET', '/api/leads?' + leadsQuery()); }
 
-  async function renderContas() {
-    const f = state.filters;
-    const checks = (key, list) => list.map(([k, l]) => `<label class="check"><input type="checkbox" data-f="${key}" value="${esc(k)}" ${(f[key] || []).includes(k) ? 'checked' : ''}>${esc(l)}</label>`).join('');
+  async function renderOportunidades() {
+    const p = pipe();
+    const fCount = state.origins.size + (state.task ? 1 : 0);
     app.innerHTML = `
-      <div class="toolbar">
-        <input type="search" id="search" placeholder="Buscar conta, cidade, domínio, contato, telefone…  ( / )" value="${esc(f.q || '')}">
-        <button class="btn filter-toggle" id="ftoggle">Filtros</button>
-        ${PRESETS.map(([k, l]) => `<button class="chip${f.preset === k ? ' on' : ''}" data-preset="${k}">${l}</button>`).join('')}
-        <button class="btn link" id="fclear">Limpar filtros</button>
+      <div class="bar">
+        <select class="select-lg" id="pipe-sel" aria-label="Pipeline">${opts(state.meta.pipelines.map((x) => [x.id, x.name]), p.id)}</select>
+        <span class="count-pill" id="lead-count"></span>
         <span class="spacer"></span>
-        <span class="muted num" id="count"></span>
-        <a class="btn" id="csv" href="#">Exportar CSV</a>
-        <button class="btn" id="new-acc">Nova conta</button>
+        <div class="seg"><button data-view="board" class="${state.view === 'board' ? 'on' : ''}" title="Quadro">${I.grid}</button><button data-view="list" class="${state.view === 'list' ? 'on' : ''}" title="Lista">${I.list}</button></div>
+        <button class="btn primary" id="add-lead">${I.plus} Adicionar oportunidade</button>
       </div>
-      <div class="accounts">
-        <aside class="card filters" id="filters">
-          <h3>Trilha</h3>${checks('track', CRM.TRACKS)}
-          <h3>Estágio</h3>${checks('stage', CRM.STAGES)}
-          <h3>Tem achado de vazamento</h3>
-          <div class="chips">${[['', 'Todos'], ['yes', 'Sim'], ['no', 'Não']].map(([k, l]) => `<button class="chip${(f.finding || '') === k ? ' on' : ''}" data-finding="${k}">${l}</button>`).join('')}</div>
-          <h3>Sem contato há mais de</h3>
-          <div style="display:flex;gap:6px;align-items:center"><input type="number" id="stale" min="1" style="width:70px" value="${esc(f.stale || '')}"> dias</div>
-          <h3>Setor</h3>${checks('sector', CRM.SECTORS)}
-          <h3>Motivo de perda</h3>${checks('reason', CRM.CLOSE_REASONS)}
-          <h3>UF</h3><div class="uf-grid">${checks('uf', CRM.UFS.map((u) => [u, u]))}</div>
-        </aside>
-        <div>
-          <div id="bulk"></div>
-          <div class="table-wrap card"><table class="grid" id="tbl"></table></div>
-        </div>
-      </div>`;
-    const reload = () => { store.set('filters', state.filters); loadTable(); };
+      <div class="bar">
+        <button class="pill" data-pop id="f-origin">${I.filter} Origem${state.origins.size ? ` (${state.origins.size})` : ''}</button>
+        <button class="pill" data-pop id="f-task">${I.cal} ${esc((TASKS.find((t) => t[0] === state.task) || TASKS[0])[1] === 'Todos' ? 'Próximo passo' : TASKS.find((t) => t[0] === state.task)[1])}</button>
+        <button class="pill" data-pop id="f-sort">${I.sort} Classificar${state.sort !== 'position' ? ' (1)' : ''}</button>
+        ${fCount ? '<button class="btn ghost sm" id="f-clear">Limpar filtros</button>' : ''}
+        <span class="spacer"></span>
+        <div class="search">${I.search}<input type="search" id="q" placeholder="Pesquisar leads" value="${esc(state.q)}"></div>
+        <button class="btn" id="csv" title="Exportar CSV com os filtros aplicados">${I.download} Exportar</button>
+      </div>
+      <div id="body"></div>`;
+    $('#pipe-sel').addEventListener('change', async (e) => { state.pipelineId = Number(e.target.value); store.set('pipeline', state.pipelineId); state.checked.clear(); state.shown = {}; await refreshLeads(); });
+    $$('[data-view]').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.view; store.set('view', state.view); $$('[data-view]').forEach((x) => x.classList.toggle('on', x === b)); renderBody(); }));
+    $('#add-lead').addEventListener('click', () => openNewLead());
     let timer;
-    $('#search').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => { state.filters.q = e.target.value.trim(); reload(); }, 180); });
-    $('#search').addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' || e.key === 'Enter') { e.preventDefault(); e.target.blur(); if (state.sel < 0) state.sel = 0; highlight(); } });
-    $$('[data-f]').forEach((cb) => cb.addEventListener('change', () => {
-      const k = cb.dataset.f;
-      state.filters[k] = $$(`[data-f="${k}"]:checked`).map((x) => x.value);
-      reload();
-    }));
-    $$('[data-preset]').forEach((b) => b.addEventListener('click', () => {
-      state.filters.preset = state.filters.preset === b.dataset.preset ? '' : b.dataset.preset;
-      $$('[data-preset]').forEach((x) => x.classList.toggle('on', x.dataset.preset === state.filters.preset));
-      reload();
-    }));
-    $$('[data-finding]').forEach((b) => b.addEventListener('click', () => {
-      state.filters.finding = b.dataset.finding;
-      $$('[data-finding]').forEach((x) => x.classList.toggle('on', x === b));
-      reload();
-    }));
-    $('#stale').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => { state.filters.stale = e.target.value; reload(); }, 250); });
-    $('#fclear').addEventListener('click', () => { state.filters = {}; store.set('filters', {}); renderContas(); });
-    $('#ftoggle').addEventListener('click', () => $('#filters').classList.toggle('open'));
-    $('#csv').addEventListener('click', (e) => { e.preventDefault(); window.location.href = '/api/accounts.csv?' + filterQuery(); });
-    $('#new-acc').addEventListener('click', () => openAccountForm(null));
-    await loadTable();
-  }
-
-  async function loadTable() {
-    const rows = await api('GET', '/api/accounts?' + filterQuery());
-    state.rows = rows;
-    const ids = new Set(rows.map((r) => r.id));
-    state.checked = new Set([...state.checked].filter((id) => ids.has(id)));
-    if (state.sel >= rows.length) state.sel = rows.length - 1;
-    $('#count').textContent = `${rows.length} conta${rows.length === 1 ? '' : 's'}`;
-    const t = CRM.today();
-    const tbl = $('#tbl');
-    tbl.innerHTML = `<thead><tr><th class="nosort"><input type="checkbox" id="chk-all" aria-label="Selecionar todas"></th>
-      ${COLS.map(([k, l]) => `<th data-sort="${k}" class="${state.sort.key === k ? 'sorted' : ''}">${l}${state.sort.key === k ? (state.sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map((r, i) => {
-        const overdue = r.next_date && r.next_date < t && CRM.ACTIVE_STAGES.includes(r.stage);
-        const next = r.stage === 'encerrado' ? (r.reactivate_on ? `<span class="muted">volta ${fmtDate(r.reactivate_on)}</span>` : `<span class="muted">${esc(L.reason[r.close_reason] || '')}</span>`)
-          : r.next_date ? `<span class="${overdue ? 'overdue-text' : ''} num">${fmtDate(r.next_date)}</span> <span class="clip">${esc(r.next_action || '')}</span>`
-            : CRM.ACTIVE_STAGES.includes(r.stage) ? '<span class="overdue-text">sem próximo passo</span>' : '';
-        return `<tr data-i="${i}" data-id="${r.id}" class="${state.checked.has(r.id) ? 'checked' : ''}">
-          <td><input type="checkbox" data-chk="${r.id}" ${state.checked.has(r.id) ? 'checked' : ''}></td>
-          <td class="name"><a href="#/conta/${r.id}"><span class="clip">${esc(r.name)}</span></a>${r.findings_count ? ` <span class="badge${r.finding_stale ? ' warn' : ''}">achado</span>` : ''}</td>
-          <td>${esc(place(r))}</td><td>${esc(L.sector[r.sector] || '')}</td><td>${esc(L.track[r.track] || '')}</td>
-          <td>${stageBadge(r.stage)}</td><td><span class="clip">${esc(r.contact_name || '')}</span></td><td>${tel(r.contact_phone)}</td>
-          <td class="num">${r.last_at ? fmtDate(r.last_at.slice(0, 10)) : '<span class="faint">nunca</span>'}</td><td>${next}</td></tr>`;
-      }).join('')}</tbody>`;
-    if (!rows.length) tbl.insertAdjacentHTML('beforeend', '<tbody><tr><td colspan="10" class="empty">Nenhuma conta com esses filtros.</td></tr></tbody>');
-    $$('th[data-sort]', tbl).forEach((th) => th.addEventListener('click', () => {
-      const k = th.dataset.sort;
-      state.sort = { key: k, dir: state.sort.key === k && state.sort.dir === 'asc' ? 'desc' : 'asc' };
-      store.set('sort', state.sort); loadTable();
-    }));
-    $$('[data-chk]', tbl).forEach((cb) => cb.addEventListener('change', () => toggleCheck(Number(cb.dataset.chk), cb.checked)));
-    $('#chk-all').checked = rows.length > 0 && rows.every((r) => state.checked.has(r.id));
-    $('#chk-all').addEventListener('change', (e) => { rows.forEach((r) => (e.target.checked ? state.checked.add(r.id) : state.checked.delete(r.id))); loadTableChecks(); });
-    $$('tbody tr[data-i]', tbl).forEach((tr) => tr.addEventListener('click', (e) => { if (e.target.closest('a,input')) return; state.sel = Number(tr.dataset.i); highlight(false); }));
-    renderBulk();
-    highlight(false);
-  }
-  function toggleCheck(id, on) { if (on) state.checked.add(id); else state.checked.delete(id); loadTableChecks(); }
-  function loadTableChecks() {
-    $$('[data-chk]').forEach((cb) => { const on = state.checked.has(Number(cb.dataset.chk)); cb.checked = on; cb.closest('tr').classList.toggle('checked', on); });
-    renderBulk();
-  }
-  function renderBulk() {
-    const n = state.checked.size;
-    const el = $('#bulk');
-    if (!el) return;
-    el.innerHTML = n ? `<div class="bulk"><b>${n} selecionada${n > 1 ? 's' : ''}</b>
-      <button class="btn sm" id="b-stage">Mudar estágio</button><button class="btn sm" id="b-next">Definir próximo passo</button>
-      <button class="btn link sm" id="b-clear">Limpar seleção</button></div>` : '';
-    if (!n) return;
-    $('#b-clear').addEventListener('click', () => { state.checked.clear(); loadTableChecks(); });
-    $('#b-stage').addEventListener('click', openBatchStage);
-    $('#b-next').addEventListener('click', openBatchNext);
-  }
-
-  function openBatchStage() {
-    const ids = [...state.checked];
-    let stage = null;
-    const m = openModal(`
-      <div class="modal-h"><h2>Mudar estágio</h2><span class="muted">${ids.length} contas</span></div>
-      <div class="modal-b">
-        <div class="chips">${CRM.STAGES.map(([k, l]) => `<button type="button" class="chip" data-st="${k}">${l}</button>`).join('')}</div>
-        <div id="bs-next" hidden><div class="muted" style="margin-bottom:4px">Próximo passo (obrigatório para contas que ainda não têm, ou que estavam encerradas):</div>${nextEditorHtml('', '')}</div>
-        <div id="bs-close" hidden>${closeBoxHtml(null)}</div>
-        <div class="err" id="bs-err"></div>
-      </div>
-      <div class="modal-f"><span class="spacer"></span><button class="btn" data-x>Cancelar</button><button class="btn primary" id="bs-save">Aplicar</button></div>`);
-    bindNextEditor(m);
-    const box = bindCloseBox(m, null);
-    $$('[data-st]', m).forEach((b) => b.addEventListener('click', () => {
-      stage = b.dataset.st;
-      $$('[data-st]', m).forEach((x) => x.classList.toggle('on', x === b));
-      $('#bs-next', m).hidden = !CRM.ACTIVE_STAGES.includes(stage);
-      $('#bs-close', m).hidden = stage !== 'encerrado';
-    }));
-    $('[data-x]', m).addEventListener('click', closeModal);
-    $('#bs-save', m).addEventListener('click', async () => {
-      if (!stage) { $('#bs-err', m).textContent = 'Escolha um estágio.'; return; }
-      const body = { ids, op: 'stage', stage };
-      if (stage === 'encerrado') { const c = box.get(); if (!c) { $('#bs-err', m).textContent = 'Escolha o motivo.'; return; } Object.assign(body, c); }
-      const n = readNext(m); if (n.date) Object.assign(body, n);
-      try {
-        const r = await api('POST', '/api/batch', body);
-        closeModal(); toast(`${r.changed} conta(s) atualizada(s)${r.skipped ? ` · ${r.skipped} ignorada(s) (não querem contato)` : ''}`);
-        state.checked.clear(); loadTable();
-      } catch (e) { $('#bs-err', m).textContent = e.message; }
+    $('#q').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(async () => { state.q = e.target.value.trim(); await refreshLeads(); }, 200); });
+    $('#csv').addEventListener('click', () => { window.location.href = '/api/leads.csv?' + leadsQuery(); });
+    $('#f-origin').addEventListener('click', (e) => {
+      const pop = openPopover(e.currentTarget, [...state.meta.origins.map((o) => [String(o.id), o.name, o.color]), ['none', 'Sem origem', '#fff']].map(([k, l, c]) =>
+        `<label><input type="checkbox" value="${k}" ${state.origins.has(k) ? 'checked' : ''}><span class="tag" style="background:${c};border:1px solid #e5e7eb">${esc(l)}</span></label>`).join(''));
+      $$('input', pop).forEach((cb) => cb.addEventListener('change', async () => {
+        if (cb.checked) state.origins.add(cb.value); else state.origins.delete(cb.value);
+        store.set('origins', [...state.origins]); await refreshLeads(true);
+      }));
     });
-  }
-  function openBatchNext() {
-    const ids = [...state.checked];
-    const m = openModal(`
-      <div class="modal-h"><h2>Definir próximo passo</h2><span class="muted">${ids.length} contas</span></div>
-      <div class="modal-b">${nextEditorHtml(CRM.plusDays(1), 'Primeira tentativa')}<div class="muted">Contas encerradas ou com o closer são ignoradas.</div><div class="err" id="bn-err"></div></div>
-      <div class="modal-f"><span class="spacer"></span><button class="btn" data-x>Cancelar</button><button class="btn primary" id="bn-save">Aplicar</button></div>`);
-    bindNextEditor(m);
-    $('[data-x]', m).addEventListener('click', closeModal);
-    $('#bn-save', m).addEventListener('click', async () => {
-      const n = readNext(m);
-      if (!n.date) { $('#bn-err', m).textContent = 'Defina a data.'; return; }
-      try {
-        const r = await api('POST', '/api/batch', { ids, op: 'next_step', ...n });
-        closeModal(); toast(`${r.changed} conta(s) atualizada(s)${r.skipped ? ` · ${r.skipped} ignorada(s)` : ''}`);
-        state.checked.clear(); loadTable();
-      } catch (e) { $('#bn-err', m).textContent = e.message; }
+    $('#f-task').addEventListener('click', (e) => {
+      const pop = openPopover(e.currentTarget, TASKS.map(([k, l]) => `<button class="opt${state.task === k ? ' on' : ''}" data-k="${k}">${l}</button>`).join(''));
+      $$('[data-k]', pop).forEach((b) => b.addEventListener('click', async () => { state.task = b.dataset.k; store.set('task', state.task); closePopover(); await refreshLeads(true); }));
     });
+    $('#f-sort').addEventListener('click', (e) => {
+      const pop = openPopover(e.currentTarget, SORTS.filter((x) => !x[3] || x[0] === state.sort).map(([k, l]) => `<button class="opt${state.sort === k ? ' on' : ''}" data-k="${k}">${l}</button>`).join(''));
+      $$('[data-k]', pop).forEach((b) => b.addEventListener('click', async () => { state.sort = b.dataset.k; store.set('sort', state.sort); closePopover(); await refreshLeads(true); }));
+    });
+    if ($('#f-clear')) $('#f-clear').addEventListener('click', async () => { state.origins.clear(); state.task = ''; store.set('origins', []); store.set('task', ''); await refreshLeads(true); });
+    await loadLeads();
+    renderBody();
+  }
+  // full = redesenha também a barra (contadores dos filtros).
+  async function refreshLeads(full) {
+    if (full) return renderOportunidades();
+    await loadLeads(); renderBody();
   }
 
-  // =====================================================================
-  // Tela 3 — Ficha da conta
-  // =====================================================================
-  async function renderConta(id) {
-    const a = await api('GET', `/api/accounts/${id}`);
-    state.account = a;
-    state.rows = []; state.sel = -1;
-    const t = a.today;
-    const active = CRM.ACTIVE_STAGES.includes(a.stage);
-    const overdue = active && a.next_date && a.next_date < t;
-    const meta = [
-      place(a) && esc(place(a)), a.sector && esc(L.sector[a.sector]),
-      a.domain && `<a href="${/^https?:/.test(a.domain) ? '' : 'https://'}${esc(a.domain)}" target="_blank" rel="noopener">${esc(a.domain)}</a>`,
-      a.size && `${esc(L.size[a.size])} funcionários`, a.cnpj && `CNPJ ${esc(fmtCnpj(a.cnpj))}`, a.source && `origem: ${esc(a.source)}`,
-    ].filter(Boolean);
+  function renderBody() {
+    const body = $('#body');
+    if (!body) return;
+    $('#lead-count').textContent = `${state.leads.length} lead${state.leads.length === 1 ? '' : 's'}`;
+    if (state.view === 'list') renderList(body); else renderBoard(body);
+  }
 
-    let nextHtml;
-    if (active) {
-      nextHtml = `<div class="next-block${overdue ? ' overdue' : ''}">
-        <span class="lbl">Próximo passo</span>
-        ${a.next_date ? `<span class="when">${fmtDate(a.next_date)}${overdue ? ` · ${CRM.daysBetween(a.next_date, t)}d atrasado` : ''}</span><span class="what">${esc(a.next_action || '')}</span>`
-          : '<span class="what overdue-text">Sem próximo passo — defina agora</span>'}
-        <button class="btn primary" id="log-btn">Registrar contato <kbd>R</kbd></button>
-        ${a.next_date ? '<button class="btn" id="done-btn">Concluir <kbd>P</kbd></button><button class="btn" id="pp-btn">Adiar <kbd>A</kbd></button>' : ''}
-        <button class="btn" id="edit-next">${a.next_date ? 'Editar' : 'Definir'}</button>
-        ${a.stage === 'reuniao' ? '<button class="btn danger" id="noshow-btn">No-show</button>' : ''}
-      </div>`;
-    } else if (a.stage === 'encerrado') {
-      nextHtml = `<div class="next-block closed"><span class="lbl">Encerrada</span>
-        <span class="what">${esc(L.reason[a.close_reason] || 'sem motivo')}${a.do_not_contact ? ' · <b style="color:var(--red)">nunca mais contatar</b>' : a.reactivate_on ? ` · volta para a fila em ${fmtFull(a.reactivate_on)}` : ' · não volta'}</span>
-        <button class="btn" id="log-btn">Anotar contato <kbd>R</kbd></button></div>`;
-    } else {
-      nextHtml = `<div class="next-block closed"><span class="lbl">Passado ao closer</span><span class="what">Saiu da sua mão.</span><button class="btn" id="log-btn">Anotar contato <kbd>R</kbd></button></div>`;
-    }
-
-    const doneAngles = (k) => a[k];
-    const hours = new Set((a.rc_hours || '').split(',').filter(Boolean));
-    const reception = a.stage === 'travado' ? `
-      <section class="card"><div class="card-h"><h2>Travado na recepção — ângulos</h2><span class="muted">${a.attempts_without_decisor} tentativas sem decisor</span><span class="spacer"></span>
-        <span class="muted">Ângulos ainda não usados: <b>${[...CRM.RECEPTION_HOURS.filter(([k]) => !hours.has(k)).map((h) => h[1].toLowerCase()), ...CRM.RECEPTION_CHECKS.filter(([k]) => !doneAngles(k)).map((c) => c[1].replace(/^Já (perguntei|tentei|busquei) /, '').replace(/^o /, ''))].length}</b></span></div>
-        <div class="card-b reception">
-          ${CRM.RECEPTION_HOURS.map(([k, l]) => `<label class="check ${hours.has(k) ? 'done' : 'todo'}"><input type="checkbox" data-hour="${k}" ${hours.has(k) ? 'checked' : ''}>Horário tentado: ${l}</label>`).join('')}
-          ${CRM.RECEPTION_CHECKS.map(([k, l]) => `<label class="check ${a[k] ? 'done' : 'todo'}"><input type="checkbox" data-rc="${k}" ${a[k] ? 'checked' : ''}>${l}</label>`).join('')}
-        </div></section>` : '';
-
-    const findings = a.findings.length ? `
-      <section class="card"><div class="card-h"><h2>Achados</h2><span class="spacer"></span><button class="btn sm" id="add-finding">Adicionar</button></div>
-        <div class="card-b">${a.findings.map((f) => `<div class="finding">
-          <div><b>${esc(f.source || 'fonte?')}</b></div>
-          <div class="num ${f.stale ? 'stale' : ''}" title="${f.stale ? 'Mais de 30 dias: o gancho esfria quando a empresa troca as senhas' : ''}">${f.found_on ? f.found_on.split('-').reverse().join('/') : '—'}${f.age_days !== null ? ` · ${f.age_days}d` : ''}${f.stale ? ' · esfriando' : ''}</div>
-          <div class="num">${f.credentials ?? '—'} cred.</div>
-          <div>${esc(L.severity[f.severity] || '—')}</div>
-          <div>${f.published ? 'publicado' : '<span class="muted">não publicado</span>'}</div>
-          <div class="muted" style="white-space:pre-wrap">${esc(f.note || '')}</div>
-          <div><button class="btn link sm" data-edit-finding="${f.id}">editar</button></div>
-        </div>`).join('')}</div></section>` : '';
-
-    const reactBanner = a.reactivated ? `<div class="banner"><b>Voltou para a fila.</b> Encerrada antes por “${esc(L.reason[a.close_reason] || '')}”.
-      ${a.close_note ? `<br><b>O que deu errado:</b> ${esc(a.close_note)}` : ''}</div>` : '';
-    const suggest = a.suggest_reception ? `<div class="banner neutral">${a.attempts_without_decisor} tentativas sem falar com o decisor. <button class="btn sm" id="to-travado">Mover para Travado na recepção</button></div>` : '';
-
-    app.innerHTML = `<div class="ficha">
-      <section class="card acc-head"><div class="card-b">
-        <div class="title">
-          <h1>${esc(a.name)}</h1>
-          <select class="inline" id="stage-sel" aria-label="Estágio">${CRM.STAGES.map(([k, l]) => `<option value="${k}"${k === a.stage ? ' selected' : ''}>${l}</option>`).join('')}</select>
-          <select class="inline" id="track-sel" aria-label="Trilha">${opts(CRM.TRACKS, a.track, 'Sem trilha')}</select>
-          <span class="spacer"></span>
-          ${!a.findings.length ? '<button class="btn sm" id="add-finding">+ Achado</button>' : ''}
-          <button class="btn sm" id="edit-acc">Editar <kbd>E</kbd></button>
+  // ---------- quadro ----------
+  function renderBoard(body) {
+    const p = pipe();
+    const byStage = new Map(p.stages.map((s) => [s.id, []]));
+    for (const l of state.leads) if (byStage.has(l.stage_id)) byStage.get(l.stage_id).push(l);
+    body.innerHTML = `<div class="board" id="board">${p.stages.map((s) => {
+      const list = byStage.get(s.id);
+      const total = list.reduce((a, l) => a + (l.value || 0), 0);
+      const shown = state.shown[s.id] || PAGE;
+      const collapsed = state.collapsed.has(s.id);
+      return `<section class="col${collapsed ? ' collapsed' : ''}" data-stage="${s.id}">
+        <div class="col-h" style="background:${s.color}">
+          <div class="t" title="${esc(s.name)}">${esc(s.name)}</div>
+          <div class="s">${list.length} oportunidade${list.length === 1 ? '' : 's'}<b>${money(total)}</b></div>
+          <button class="ic add" data-add="${s.id}" title="Adicionar neste estágio">${I.plus}</button>
+          <button class="ic collapse" data-collapse="${s.id}" title="${collapsed ? 'Expandir' : 'Recolher'}">${collapsed ? I.right : I.left}</button>
         </div>
-        <div class="meta">${meta.join('<span class="faint">·</span>') || '<span class="faint">Sem dados — clique em Editar para completar.</span>'}</div>
-        ${a.notes ? `<div class="notes">${esc(a.notes)}</div>` : ''}
-        ${reactBanner}${suggest}
-        <table class="mini"><thead><tr><th></th><th>Contato</th><th>Cargo</th><th>Telefone</th><th>E-mail</th><th>Canal</th><th></th></tr></thead><tbody>
-          ${a.contacts.map((c) => `<tr><td class="star" title="${c.is_primary ? 'Principal' : 'Tornar principal'}">${c.is_primary ? '★' : `<button class="btn link sm" data-primary="${c.id}" style="padding:0">☆</button>`}</td>
-            <td>${esc(c.name || '')}</td><td class="muted">${esc(c.role || '')}</td><td>${tel(c.phone)}</td>
-            <td>${c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ''}</td><td class="muted">${esc(L.channel[c.channel] || '')}</td>
-            <td><button class="btn link sm" data-edit-contact="${c.id}">editar</button></td></tr>`).join('') || '<tr><td></td><td colspan="6" class="faint">Nenhum contato.</td></tr>'}
-        </tbody></table>
-        <button class="btn link sm" id="add-contact" style="margin-top:4px;padding-left:0">+ contato</button>
-      </div></section>
-      ${nextHtml}
-      ${findings}
-      ${reception}
-      <section class="card"><div class="card-h"><h2>Histórico</h2><span class="muted">${a.timeline.filter((x) => x.kind === 'activity').length} registros</span></div>
-        <div class="card-b"><ul class="timeline">${a.timeline.map(timelineItem).join('') || '<li class="faint" style="display:block">Nada registrado ainda.</li>'}</ul></div></section>
-    </div>`;
-
-    const after = () => renderConta(a.id);
-    $('#log-btn').addEventListener('click', () => openLog(a, after));
-    if ($('#done-btn')) $('#done-btn').addEventListener('click', () => openNextStep(a, { complete: true }, after));
-    if ($('#pp-btn')) $('#pp-btn').addEventListener('click', (e) => openPostpone(a, e.currentTarget, after));
-    if ($('#edit-next')) $('#edit-next').addEventListener('click', () => openNextStep(a, {}, after));
-    if ($('#noshow-btn')) $('#noshow-btn').addEventListener('click', () => {
-      openNextStep({ ...a, next_date: null }, { title: 'No-show: próximo passo para remarcar', action: 'Remarcar reunião' }, {
-        custom: async (n) => { try { await api('POST', `/api/accounts/${a.id}/no-show`, { next: n }); toast('No-show registrado'); after(); } catch (e) { fail(e); } },
-      });
+        <div class="col-body" data-drop="${s.id}">
+          ${list.slice(0, shown).map(cardHtml).join('')}
+          ${list.length > shown ? `<button class="more" data-more="${s.id}">Mostrar mais ${Math.min(list.length - shown, 100)} de ${list.length - shown}</button>` : ''}
+        </div>
+      </section>`;
+    }).join('')}</div>`;
+    $$('[data-collapse]', body).forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = Number(b.dataset.collapse);
+      if (state.collapsed.has(id)) state.collapsed.delete(id); else state.collapsed.add(id);
+      store.set('collapsed', [...state.collapsed]); renderBody();
+    }));
+    $$('[data-add]', body).forEach((b) => b.addEventListener('click', () => openNewLead(Number(b.dataset.add))));
+    $$('[data-more]', body).forEach((b) => b.addEventListener('click', () => { const id = Number(b.dataset.more); state.shown[id] = (state.shown[id] || PAGE) + 100; renderBody(); }));
+    $$('.card', body).forEach((c) => {
+      c.addEventListener('click', (e) => { if (!e.target.closest('a')) openDrawer(Number(c.dataset.id)); });
+      c.addEventListener('dragstart', (e) => { dragId = Number(c.dataset.id); c.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragId)); });
+      c.addEventListener('dragend', () => { c.classList.remove('dragging'); cleanupDrag(); });
     });
-    if ($('#to-travado')) $('#to-travado').addEventListener('click', () => changeStage(a, 'travado', after));
-    $('#stage-sel').addEventListener('change', (e) => changeStage(a, e.target.value, after));
-    $('#track-sel').addEventListener('change', async (e) => { try { await api('PATCH', `/api/accounts/${a.id}`, { track: e.target.value }); toast('Trilha atualizada'); } catch (err) { fail(err); } });
-    $('#edit-acc').addEventListener('click', () => openAccountForm(a, after));
-    $('#add-contact').addEventListener('click', () => openContactForm(a, null, after));
-    $$('[data-edit-contact]').forEach((b) => b.addEventListener('click', () => openContactForm(a, a.contacts.find((c) => c.id === Number(b.dataset.editContact)), after)));
-    $$('[data-primary]').forEach((b) => b.addEventListener('click', async () => { try { await api('PATCH', `/api/contacts/${b.dataset.primary}`, { is_primary: true }); after(); } catch (e) { fail(e); } }));
-    $$('#add-finding').forEach((b) => b.addEventListener('click', () => openFindingForm(a, null, after)));
-    $$('[data-edit-finding]').forEach((b) => b.addEventListener('click', () => openFindingForm(a, a.findings.find((f) => f.id === Number(b.dataset.editFinding)), after)));
-    $$('[data-rc]').forEach((cb) => cb.addEventListener('change', async () => { try { await api('PATCH', `/api/accounts/${a.id}`, { [cb.dataset.rc]: cb.checked }); after(); } catch (e) { fail(e); } }));
-    $$('[data-hour]').forEach((cb) => cb.addEventListener('change', async () => {
-      const hs = $$('[data-hour]').filter((x) => x.checked).map((x) => x.dataset.hour);
-      try { await api('PATCH', `/api/accounts/${a.id}`, { rc_hours: hs }); after(); } catch (e) { fail(e); }
-    }));
-    $$('[data-del-act]').forEach((b) => b.addEventListener('click', async () => {
-      if (!confirm('Apagar este registro de contato?')) return;
-      try { await api('DELETE', `/api/activities/${b.dataset.delAct}`); after(); } catch (e) { fail(e); }
-    }));
+    $$('[data-drop]', body).forEach(bindDrop);
   }
 
-  function timelineItem(x) {
-    const at = `<span class="at">${esc(fmtAt(x.at))}</span>`;
-    if (x.kind === 'activity') {
-      const head = [L.channel[x.channel], L.result[x.result]].filter(Boolean).map(esc).join(' · ');
-      return `<li>${at}<div><b>${head || 'Contato'}</b>${x.contact_name ? ` <span class="muted">com ${esc(x.contact_name)}</span>` : ''}
-        ${x.objection ? ` <span class="badge">objeção: ${esc(L.objection[x.objection])}</span>` : ''}
-        ${x.note ? `<div class="note">${esc(x.note)}</div>` : ''}</div>
-        <button class="btn link sm del" data-del-act="${x.id}" title="Apagar registro">apagar</button></li>`;
-    }
-    const d = x.data || {};
-    let txt = '';
-    if (x.type === 'estagio') txt = `Estágio: ${esc(L.stage[x.from_stage] || '—')} → <b>${esc(L.stage[x.to_stage])}</b>`;
-    else if (x.type === 'encerrada') txt = `Encerrada: <b>${esc(L.reason[d.reason] || '')}</b>${d.reactivate_on ? ` · volta em ${d.reactivate_on.split('-').reverse().join('/')}` : ''}${d.note ? ` — ${esc(d.note)}` : ''}`;
-    else if (x.type === 'reativada') txt = `<b>Voltou para a fila</b> (motivo anterior: ${esc(L.reason[d.reason] || '')})`;
-    else if (x.type === 'no_show') txt = '<b>No-show</b> na reunião';
-    else if (x.type === 'passo_concluido') txt = `Passo concluído: ${esc(d.action || '')}`;
-    return `<li class="ev">${at}<div>${txt}</div><span></span></li>`;
-  }
-
-  // =====================================================================
-  // Números
-  // =====================================================================
-  function periodFromPreset(p) {
-    const t = CRM.today();
-    if (p === '7') return [CRM.addDays(t, -6), t];
-    if (p === '30') return [CRM.addDays(t, -29), t];
-    if (p === '90') return [CRM.addDays(t, -89), t];
-    if (p === 'mes') return [t.slice(0, 8) + '01', t];
-    if (p === 'mes_ant') { const first = t.slice(0, 8) + '01'; const end = CRM.addDays(first, -1); return [end.slice(0, 8) + '01', end]; }
-    return null;
-  }
-  async function renderNumeros() {
-    const s = state.metrics;
-    const [from, to] = periodFromPreset(s.preset) || [s.from, s.to];
-    const q = new URLSearchParams({ from: from || '', to: to || '' });
-    if (s.track && s.track.length) q.set('track', s.track.join(','));
-    const d = await api('GET', '/api/metrics?' + q);
-    const pct = (v) => (v === null ? '—' : (v * 100).toFixed(1).replace('.', ',') + '%');
-    const dec = (v) => (v === null ? '—' : v.toFixed(v < 10 ? 2 : 1).replace('.', ','));
-    const maxObj = Math.max(1, ...d.objections.map((o) => o.n));
-    app.innerHTML = `
-      <div class="toolbar">
-        <div class="chips">${[['7', '7 dias'], ['30', '30 dias'], ['90', '90 dias'], ['mes', 'Este mês'], ['mes_ant', 'Mês passado'], ['custom', 'Período']].map(([k, l]) => `<button class="chip${s.preset === k ? ' on' : ''}" data-p="${k}">${l}</button>`).join('')}</div>
-        <input type="date" id="m-from" value="${esc(d.from)}"> até <input type="date" id="m-to" value="${esc(d.to)}">
-        <span class="spacer"></span>
-        <div class="chips">${CRM.TRACKS.map(([k, l]) => `<button class="chip${(s.track || []).includes(k) ? ' on' : ''}" data-t="${k}">${l}</button>`).join('')}</div>
+  function cardHtml(l) {
+    const t = state.meta.today;
+    const late = l.task_date && l.task_date < t;
+    const phone = l.phone ? `<a class="phone" href="tel:${esc(digits(l.phone))}">${esc(l.phone)}</a>` : '<span class="faint">—</span>';
+    return `<article class="card" draggable="true" data-id="${l.id}">
+      <div class="top-row"><span class="name" title="${esc(l.name)}">${esc(l.name)}</span>${l.origin_id ? originTag(l.origin_id) : ''}</div>
+      <div class="row"><span class="l">Telefone</span><span class="v">${phone}</span></div>
+      <div class="row"><span class="l">Contato</span><span class="v">${l.contact_name ? `<span class="person"><span class="ini">${esc(initials(l.contact_name))}</span><span>${esc(l.contact_name)}</span></span>` : '<span class="faint">—</span>'}</span></div>
+      ${l.company && l.company !== l.name ? `<div class="row"><span class="l">Empresa</span><span class="v">${esc(l.company)}</span></div>` : ''}
+      <div class="row"><span class="l">Atualizado</span><span class="v">${esc(fmtDT(l.updated_at))}</span></div>
+      ${l.task_date ? `<div class="row"><span class="l">Próx. passo</span><span class="v ${late ? 'late-text' : ''}">${esc(fmtDate(l.task_date))} · ${esc(l.task_title || '')}</span></div>` : ''}
+      <div class="foot">
+        ${l.phone ? `<a href="tel:${esc(digits(l.phone))}" title="Ligar">${I.phone}</a><a href="${waLink(l.phone)}" target="_blank" rel="noopener" title="WhatsApp">${I.chat}</a>` : `<span class="ic faint">${I.phone}</span><span class="ic faint">${I.chat}</span>`}
+        ${l.email ? `<a href="mailto:${esc(l.email)}" title="E-mail">${I.mail}</a>` : ''}
+        <span class="ic" title="Registros no histórico">${I.note}${l.activities_count ? `<span class="badge">${l.activities_count}</span>` : ''}</span>
+        <span class="ic ${late ? 'late' : ''}" title="${l.task_date ? 'Próximo passo: ' + esc(fmtDate(l.task_date)) : 'Sem próximo passo'}">${I.cal}</span>
+        ${l.value ? `<span class="value">${money(l.value)}</span>` : ''}
       </div>
-      <section class="card"><div class="card-h"><h2>Período</h2><span class="muted">${d.from.split('-').reverse().join('/')} a ${d.to.split('-').reverse().join('/')}${d.track.length ? ' · ' + d.track.map((k) => L.track[k]).join(', ') : ''}</span></div>
-        <div class="kpis">
-          ${[['Tentativas de contato', d.attempts], ['Conversas com decisor', d.conversations], ['Taxa de conexão', pct(d.connection_rate)],
-            ['Reuniões agendadas', d.meetings], ['Conexão que vira reunião', pct(d.conversation_to_meeting)], ['Tentativas por reunião', dec(d.attempts_per_meeting)], ['No-show', d.no_shows]]
-            .map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}
-        </div></section>
-      <section class="card" style="margin-top:12px"><div class="card-h"><h2>Trilhas lado a lado</h2><span class="muted">reuniões por conta trabalhada decide o carro-chefe</span></div>
-        <div class="table-wrap"><table class="grid"><thead><tr><th class="nosort">Trilha</th><th class="nosort">Contas trabalhadas</th><th class="nosort">Tentativas</th><th class="nosort">Conversas</th><th class="nosort">Conexão</th><th class="nosort">Reuniões</th><th class="nosort">Reuniões por conta trabalhada</th></tr></thead>
-        <tbody>${d.by_track.map((r) => `<tr><td><b>${esc(r.track ? L.track[r.track] : 'Sem trilha')}</b></td><td class="num">${r.worked}</td><td class="num">${r.attempts}</td><td class="num">${r.conversations}</td>
-          <td class="num">${pct(r.connection_rate)}</td><td class="num">${r.meetings}</td><td class="num"><b>${r.meetings_per_worked === null ? '—' : dec(r.meetings_per_worked)}</b></td></tr>`).join('')}</tbody></table></div></section>
-      <section class="card" style="margin-top:12px;max-width:560px"><div class="card-h"><h2>Objeções no período</h2></div>
-        <div class="card-b">${d.objections.length ? `<table class="mini" style="margin:0">${d.objections.map((o) => `<tr><td>${esc(L.objection[o.objection] || o.objection)}</td><td class="num" style="width:40px">${o.n}</td><td style="width:45%"><div class="bar"><i style="width:${(o.n / maxObj) * 100}%"></i></div></td></tr>`).join('')}</table>` : '<span class="faint">Nenhuma objeção registrada.</span>'}</div></section>`;
-    const save = () => { store.set('metrics', state.metrics); renderNumeros(); };
-    $$('[data-p]').forEach((b) => b.addEventListener('click', () => { state.metrics.preset = b.dataset.p; if (b.dataset.p === 'custom') { state.metrics.from = d.from; state.metrics.to = d.to; } save(); }));
-    $$('[data-t]').forEach((b) => b.addEventListener('click', () => {
-      const t = new Set(state.metrics.track || []); if (t.has(b.dataset.t)) t.delete(b.dataset.t); else t.add(b.dataset.t);
-      state.metrics.track = [...t]; save();
+    </article>`;
+  }
+
+  // Arrastar e soltar entre colunas, com posição dentro da coluna.
+  let dragId = null;
+  let ph = null;
+  function cleanupDrag() { if (ph) ph.remove(); ph = null; dragId = null; $$('.col-body.over').forEach((x) => x.classList.remove('over')); }
+  function bindDrop(zone) {
+    zone.addEventListener('dragover', (e) => {
+      if (!dragId) return;
+      e.preventDefault();
+      zone.classList.add('over');
+      if (!ph) { ph = document.createElement('div'); ph.className = 'placeholder'; }
+      const after = [...zone.querySelectorAll('.card:not(.dragging)')].find((c) => { const r = c.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+      if (after) zone.insertBefore(ph, after);
+      else { const more = zone.querySelector('.more'); zone.insertBefore(ph, more || null); }
+    });
+    zone.addEventListener('dragleave', (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('over'); });
+    zone.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      if (!dragId || !ph) return cleanupDrag();
+      const id = dragId;
+      const stageId = Number(zone.dataset.drop);
+      const prevEl = ph.previousElementSibling && ph.previousElementSibling.classList.contains('card') ? ph.previousElementSibling : null;
+      let nextEl = ph.nextElementSibling;
+      while (nextEl && (!nextEl.classList.contains('card') || Number(nextEl.dataset.id) === id)) nextEl = nextEl.nextElementSibling;
+      const prev = prevEl && Number(prevEl.dataset.id) !== id ? state.leads.find((x) => x.id === Number(prevEl.dataset.id)) : null;
+      const next = nextEl ? state.leads.find((x) => x.id === Number(nextEl.dataset.id)) : null;
+      cleanupDrag();
+      const l = state.leads.find((x) => x.id === id);
+      if (!l) return;
+      let position;
+      if (state.sort === 'position') {
+        position = prev && next ? (prev.position + next.position) / 2 : prev ? prev.position + 1 : next ? next.position - 1 : 0;
+      }
+      if (l.stage_id === stageId && (position === undefined || position === l.position)) return;
+      const old = { stage_id: l.stage_id, position: l.position };
+      Object.assign(l, { stage_id: stageId, position: position ?? l.position, updated_at: CRM.isoDateTime(new Date()) });
+      if (state.sort === 'position') state.leads.sort((a, b) => a.position - b.position || b.id - a.id);
+      renderBody();
+      try {
+        const r = await api('POST', `/api/leads/${id}/move`, { stage_id: stageId, position });
+        Object.assign(l, { position: r.position, updated_at: r.updated_at });
+        if (old.stage_id !== stageId) toast(`Movido para ${stageOf(stageId).name}`);
+      } catch (err) { Object.assign(l, old); renderBody(); fail(err); }
+    });
+  }
+
+  // ---------- lista ----------
+  const LIST_COLS = [['name', 'Nome'], ['stage', 'Estágio'], ['origin', 'Origem'], ['contact', 'Contato'], [null, 'Telefone'], ['value', 'Valor'], ['task', 'Próximo passo'], ['updated', 'Atualizado']];
+  function renderList(body) {
+    const t = state.meta.today;
+    const p = pipe();
+    const n = state.checked.size;
+    body.innerHTML = `
+      ${n ? `<div class="bulk"><b>${n} selecionado${n > 1 ? 's' : ''}</b>
+        <select id="b-stage"><option value="">Mover para estágio…</option>${opts(p.stages.map((s) => [s.id, s.name]))}</select>
+        <select id="b-origin"><option value="">Definir origem…</option>${opts(state.meta.origins.map((o) => [o.id, o.name]))}<option value="0">Sem origem</option></select>
+        <button class="btn sm danger" id="b-del">Excluir</button><button class="btn ghost sm" id="b-clear">Limpar seleção</button></div>` : ''}
+      <div class="table-wrap"><table class="grid"><thead><tr>
+        <th class="nosort"><input type="checkbox" id="chk-all"></th>
+        ${LIST_COLS.map(([k, l]) => `<th class="${k ? '' : 'nosort'}" ${k ? `data-sort="${k}"` : ''}>${l}${k && state.sort === k ? ' ↓' : ''}</th>`).join('')}
+      </tr></thead><tbody>
+        ${state.leads.map((l) => { const s = stageOf(l.stage_id); const late = l.task_date && l.task_date < t; return `<tr data-id="${l.id}" class="${state.checked.has(l.id) ? 'checked' : ''}">
+          <td><input type="checkbox" data-chk="${l.id}" ${state.checked.has(l.id) ? 'checked' : ''}></td>
+          <td class="name">${esc(l.name)}</td>
+          <td><span class="stage-dot" style="background:${s ? s.color : '#eee'}"></span>${esc(s ? s.name : '')}</td>
+          <td>${originTag(l.origin_id)}</td><td>${esc(l.contact_name || '')}</td>
+          <td>${l.phone ? `<a href="tel:${esc(digits(l.phone))}">${esc(l.phone)}</a>` : ''}</td>
+          <td>${l.value ? money(l.value) : ''}</td>
+          <td class="${late ? 'late-text' : ''}">${l.task_date ? `${fmtDate(l.task_date)} · ${esc(l.task_title || '')}` : '<span class="faint">—</span>'}</td>
+          <td class="muted">${fmtDT(l.updated_at)}</td></tr>`; }).join('') || `<tr><td colspan="9" class="muted" style="padding:20px">Nenhum lead encontrado.</td></tr>`}
+      </tbody></table></div>`;
+    $$('th[data-sort]', body).forEach((th) => th.addEventListener('click', async () => {
+      state.sort = th.dataset.sort; store.set('sort', state.sort);
+      await refreshLeads(true);
     }));
-    const custom = () => { state.metrics = { ...state.metrics, preset: 'custom', from: $('#m-from').value, to: $('#m-to').value }; save(); };
-    $('#m-from').addEventListener('change', custom); $('#m-to').addEventListener('change', custom);
+    $$('tbody tr[data-id]', body).forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('a,input')) openDrawer(Number(tr.dataset.id)); }));
+    $$('[data-chk]', body).forEach((cb) => cb.addEventListener('change', () => { const id = Number(cb.dataset.chk); if (cb.checked) state.checked.add(id); else state.checked.delete(id); renderBody(); }));
+    const all = $('#chk-all', body);
+    all.checked = state.leads.length > 0 && state.leads.every((l) => state.checked.has(l.id));
+    all.addEventListener('change', () => { state.leads.forEach((l) => (all.checked ? state.checked.add(l.id) : state.checked.delete(l.id))); renderBody(); });
+    if (!n) return;
+    const ids = [...state.checked];
+    const done = async (msg) => { state.checked.clear(); toast(msg); await loadMeta(); await refreshLeads(); };
+    $('#b-clear').addEventListener('click', () => { state.checked.clear(); renderBody(); });
+    $('#b-stage').addEventListener('change', async (e) => { try { await api('POST', '/api/leads/bulk', { ids, action: 'move', stage_id: Number(e.target.value) }); done(`${ids.length} lead(s) movido(s)`); } catch (err) { fail(err); } });
+    $('#b-origin').addEventListener('change', async (e) => { try { await api('POST', '/api/leads/bulk', { ids, action: 'origin', origin_id: Number(e.target.value) || null }); done('Origem atualizada'); } catch (err) { fail(err); } });
+    $('#b-del').addEventListener('click', async () => {
+      if (!confirm(`Excluir ${ids.length} lead(s)? Não dá para desfazer.`)) return;
+      try { await api('POST', '/api/leads/bulk', { ids, action: 'delete' }); done(`${ids.length} lead(s) excluído(s)`); } catch (err) { fail(err); }
+    });
+  }
+
+  // ---------- nova oportunidade ----------
+  function leadFieldsHtml(l = {}) {
+    return `
+      <label>Empresa<input type="text" name="company" value="${esc(l.company)}"></label>
+      <label>Contato<input type="text" name="contact_name" value="${esc(l.contact_name)}"></label>
+      <label>Cargo<input type="text" name="role" value="${esc(l.role)}"></label>
+      <label>Telefone<input type="tel" name="phone" value="${esc(l.phone)}" placeholder="+55 41 99999-0000"></label>
+      <label>E-mail<input type="email" name="email" value="${esc(l.email)}"></label>
+      <label>Site<input type="text" name="domain" value="${esc(l.domain)}"></label>
+      <label>CNPJ<input type="text" name="cnpj" value="${esc(l.cnpj)}" inputmode="numeric"></label>
+      <label>Valor (R$)<input type="text" name="value" value="${l.value ? String(l.value).replace('.', ',') : ''}" inputmode="decimal" placeholder="0,00"></label>
+      <label>Cidade<input type="text" name="city" value="${esc(l.city)}"></label>
+      <label>UF<select name="uf">${opts(CRM.UFS.map((u) => [u, u]), l.uf, '—')}</select></label>
+      <label class="full">Observações<textarea name="notes" rows="3">${esc(l.notes)}</textarea></label>`;
+  }
+  function openNewLead(stageId) {
+    const p = pipe();
+    const m = openModal(`
+      <div class="modal-h"><h2>Adicionar oportunidade</h2><button class="x" data-x>×</button></div>
+      <form class="modal-b" id="nl">
+        <div class="fields">
+          <label class="full">Nome do lead *<input type="text" name="name" required placeholder="Ex.: Hospital Santa Clara"></label>
+          <label>Pipeline<select name="pipeline_id" id="nl-pipe">${opts(state.meta.pipelines.map((x) => [x.id, x.name]), p.id)}</select></label>
+          <label>Estágio<select name="stage_id" id="nl-stage"></select></label>
+          <label>Origem<select name="origin_id">${opts(state.meta.origins.map((o) => [o.id, o.name]), '', 'Sem origem')}</select></label>
+          ${leadFieldsHtml()}
+          <label>Próximo passo<input type="text" name="task_title" placeholder="Ex.: Ligar para o TI"></label>
+          <label>Data do próximo passo<input type="date" name="task_date"></label>
+        </div>
+        <div class="err" id="nl-err"></div>
+      </form>
+      <div class="modal-f"><button class="btn" data-x>Cancelar</button><button class="btn primary" id="nl-save">Salvar</button></div>`);
+    const fillStages = () => {
+      const pp = state.meta.pipelines.find((x) => x.id === Number($('#nl-pipe', m).value));
+      $('#nl-stage', m).innerHTML = opts(pp.stages.map((s) => [s.id, s.name]), stageId && pp.id === p.id ? stageId : pp.stages[0].id);
+    };
+    fillStages();
+    $('#nl-pipe', m).addEventListener('change', fillStages);
+    $('[name=name]', m).focus();
+    $$('[data-x]', m).forEach((b) => b.addEventListener('click', closeModal));
+    const save = async (e) => {
+      if (e) e.preventDefault();
+      const body = Object.fromEntries(new FormData($('#nl', m)));
+      if (body.task_date && !body.task_title) body.task_title = 'Próximo passo';
+      try {
+        await api('POST', '/api/leads', body);
+        closeModal(); toast('Oportunidade criada');
+        if (Number(body.pipeline_id) !== pipe().id) { state.pipelineId = Number(body.pipeline_id); store.set('pipeline', state.pipelineId); }
+        await loadMeta(); renderOportunidades();
+      } catch (err) { $('#nl-err', m).textContent = err.message; }
+    };
+    $('#nl', m).addEventListener('submit', save);
+    $('#nl-save', m).addEventListener('click', save);
+  }
+
+  // =====================================================================
+  // Painel do lead
+  // =====================================================================
+  let drawerLead = null;
+  async function openDrawer(id) {
+    try { drawerLead = await api('GET', `/api/leads/${id}`); } catch (e) { return fail(e); }
+    renderDrawer();
+  }
+  function closeDrawer() { drawerRoot.innerHTML = ''; drawerLead = null; }
+  // Atualiza o card no quadro sem recarregar tudo.
+  function syncLead(l) {
+    drawerLead = l;
+    const i = state.leads.findIndex((x) => x.id === l.id);
+    const cnt = l.activities.filter((a) => a.type !== 'sistema').length;
+    const row = { ...l, activities_count: cnt };
+    delete row.activities;
+    if (i >= 0) {
+      if (l.pipeline_id !== pipe().id) state.leads.splice(i, 1);
+      else state.leads[i] = { ...state.leads[i], ...row };
+    }
+    renderBody();
+  }
+  function renderDrawer() {
+    const l = drawerLead;
+    const t = state.meta.today;
+    const lp = state.meta.pipelines.find((p) => p.id === l.pipeline_id);
+    const late = l.task_date && l.task_date < t;
+    drawerRoot.innerHTML = `<div class="drawer-bg"></div><aside class="drawer" role="dialog" aria-label="Lead">
+      <div class="dr-h"><span class="ini lg">${esc(initials(l.name))}</span><input id="dr-name" value="${esc(l.name)}" aria-label="Nome"><button class="x" id="dr-x" title="Fechar (Esc)">×</button></div>
+      <div class="dr-b">
+        <div class="dr-where">
+          <label class="field">Pipeline<select id="dr-pipe">${opts(state.meta.pipelines.map((p) => [p.id, p.name]), l.pipeline_id)}</select></label>
+          <label class="field">Estágio<select id="dr-stage">${opts(lp.stages.map((s) => [s.id, s.name]), l.stage_id)}</select></label>
+          <label class="field">Origem<select id="dr-origin">${opts(state.meta.origins.map((o) => [o.id, o.name]), l.origin_id, 'Sem origem')}</select></label>
+          <label class="field">Criado em<input type="text" value="${fmtDT(l.created_at)}" disabled></label>
+        </div>
+        ${l.phone || l.email ? `<div class="quick">
+          ${l.phone ? `<a class="btn sm" href="tel:${esc(digits(l.phone))}">${I.phone} Ligar</a><a class="btn sm" href="${waLink(l.phone)}" target="_blank" rel="noopener">${I.chat} WhatsApp</a>` : ''}
+          ${l.email ? `<a class="btn sm" href="mailto:${esc(l.email)}">${I.mail} E-mail</a>` : ''}</div>` : ''}
+        <section class="sec"><h3>Próximo passo</h3>
+          <div class="task-box ${late ? 'late' : ''}">
+            <div class="task-row"><input type="date" id="tk-date" value="${esc(l.task_date || '')}"><input type="text" id="tk-title" value="${esc(l.task_title || '')}" placeholder="O que fazer (ex.: ligar para o TI às 10h)"></div>
+            <div class="task-row"><button class="btn sm" id="tk-save">Salvar</button>${l.task_date || l.task_title ? `<button class="btn sm" id="tk-done">${I.check} Concluir</button>` : ''}
+              <span class="spacer"></span>${[['Amanhã', 1], ['+3 dias', 3], ['+1 semana', 7]].map(([lb, d]) => `<button class="btn ghost sm" data-days="${d}">${lb}</button>`).join('')}</div>
+            ${late ? '<div class="late-text" style="font-size:13px">Atrasado</div>' : ''}
+          </div>
+        </section>
+        <section class="sec"><h3>Registrar atividade</h3>
+          <div class="chips" id="act-types">${CRM.ACTIVITY_TYPES.map(([k, lb], i) => `<button class="chip${i === 0 ? ' on' : ''}" data-type="${k}">${lb}</button>`).join('')}</div>
+          <textarea id="act-note" rows="2" placeholder="O que aconteceu? (Ctrl+Enter salva)" style="margin-top:8px"></textarea>
+          <div style="margin-top:8px"><button class="btn primary sm" id="act-save">Registrar</button></div>
+        </section>
+        <section class="sec"><h3>Dados</h3><form class="fields" id="dr-form">${leadFieldsHtml(l)}</form></section>
+        <section class="sec"><h3>Histórico</h3><ul class="hist">${l.activities.map((a) => `<li class="${a.type === 'sistema' ? 'sys' : ''}">
+          <span class="hi">${ACT_ICON[a.type] || I.note}</span>
+          <div><div class="when">${esc(ACT_LABEL[a.type] || a.type)} · ${fmtDT(a.at)}</div>${a.note ? `<div class="note">${esc(a.note)}</div>` : ''}</div>
+          ${a.type !== 'sistema' ? `<button class="btn ghost sm del" data-del="${a.id}">apagar</button>` : '<span></span>'}</li>`).join('') || '<li class="sys" style="display:block">Nada registrado ainda.</li>'}</ul></section>
+      </div>
+      <div class="dr-f"><button class="btn danger sm" id="dr-del">Excluir lead</button><span class="spacer"></span><button class="btn sm" id="dr-close">Fechar</button></div>
+    </aside>`;
+    const patch = async (body) => { try { syncLead(await api('PATCH', `/api/leads/${l.id}`, body)); } catch (e) { fail(e); renderDrawer(); } };
+    $('.drawer-bg').addEventListener('click', closeDrawer);
+    $('#dr-x').addEventListener('click', closeDrawer);
+    $('#dr-close').addEventListener('click', closeDrawer);
+    $('#dr-name').addEventListener('change', (e) => { if (e.target.value.trim()) patch({ name: e.target.value }); });
+    $('#dr-origin').addEventListener('change', (e) => patch({ origin_id: e.target.value || null }));
+    $('#dr-stage').addEventListener('change', async (e) => {
+      try { syncLead(await api('POST', `/api/leads/${l.id}/move`, { stage_id: Number(e.target.value) })); toast(`Movido para ${stageOf(Number(e.target.value)).name}`); await refreshLeads(); renderDrawer(); } catch (err) { fail(err); }
+    });
+    $('#dr-pipe').addEventListener('change', async (e) => {
+      try { syncLead(await api('POST', `/api/leads/${l.id}/move`, { pipeline_id: Number(e.target.value) })); toast('Movido de pipeline'); await loadMeta(); renderDrawer(); } catch (err) { fail(err); }
+    });
+    $$('#dr-form input, #dr-form select, #dr-form textarea').forEach((el) => el.addEventListener('change', () => patch({ [el.name]: el.value })));
+    $$('[data-days]').forEach((b) => b.addEventListener('click', () => { $('#tk-date').value = CRM.addDays(CRM.today(), Number(b.dataset.days)); }));
+    $('#tk-save').addEventListener('click', async () => {
+      const d = $('#tk-date').value; const title = $('#tk-title').value.trim();
+      await patch({ task_date: d || null, task_title: d || title ? title || 'Próximo passo' : null });
+      toast('Próximo passo salvo'); renderDrawer();
+    });
+    if ($('#tk-done')) $('#tk-done').addEventListener('click', () => openCompleteTask(l, (r) => { syncLead(r); renderDrawer(); }));
+    let actType = CRM.ACTIVITY_TYPES[0][0];
+    $$('[data-type]').forEach((b) => b.addEventListener('click', () => { actType = b.dataset.type; $$('[data-type]').forEach((x) => x.classList.toggle('on', x === b)); $('#act-note').focus(); }));
+    const saveAct = async () => {
+      try { syncLead(await api('POST', `/api/leads/${l.id}/activities`, { type: actType, note: $('#act-note').value })); toast('Atividade registrada'); renderDrawer(); } catch (e) { fail(e); }
+    };
+    $('#act-save').addEventListener('click', saveAct);
+    $('#act-note').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveAct(); } });
+    $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Apagar este registro?')) return;
+      try { await api('DELETE', `/api/activities/${b.dataset.del}`); syncLead(await api('GET', `/api/leads/${l.id}`)); renderDrawer(); } catch (e) { fail(e); }
+    }));
+    $('#dr-del').addEventListener('click', async () => {
+      if (!confirm(`Excluir "${l.name}"? Não dá para desfazer.`)) return;
+      try {
+        await api('DELETE', `/api/leads/${l.id}`);
+        state.leads = state.leads.filter((x) => x.id !== l.id);
+        closeDrawer(); renderBody(); toast('Lead excluído');
+        if (location.hash.includes('tarefas')) refresh();
+      } catch (e) { fail(e); }
+    });
+  }
+
+  function openCompleteTask(l, after) {
+    const m = openModal(`
+      <div class="modal-h"><h2>Concluir próximo passo</h2><button class="x" data-x>×</button></div>
+      <div class="modal-b">
+        <div class="muted">Concluído: <b style="color:var(--text)">${esc(l.task_title || 'Próximo passo')}</b></div>
+        <div class="field">E qual é o próximo? (opcional)
+          <div class="task-row"><input type="date" id="cn-date" value="${CRM.addDays(CRM.today(), 1)}"><input type="text" id="cn-title" placeholder="Ex.: Follow up por WhatsApp"></div></div>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="cn-none"> Não agendar outro agora</label>
+      </div>
+      <div class="modal-f"><button class="btn" data-x>Cancelar</button><button class="btn primary" id="cn-save">Concluir</button></div>`);
+    $$('[data-x]', m).forEach((b) => b.addEventListener('click', closeModal));
+    $('#cn-title', m).focus();
+    $('#cn-save', m).addEventListener('click', async () => {
+      const none = $('#cn-none', m).checked;
+      const next = none ? null : { date: $('#cn-date', m).value, title: $('#cn-title', m).value };
+      try { const r = await api('POST', `/api/leads/${l.id}/complete-task`, { next: next && next.date ? next : null }); closeModal(); toast('Concluído'); after(r); } catch (e) { fail(e); }
+    });
+  }
+
+  // =====================================================================
+  // Tarefas
+  // =====================================================================
+  async function renderTarefas() {
+    const rows = await api('GET', '/api/tasks');
+    const t = state.meta.today;
+    const groups = [['late', 'Atrasados', rows.filter((r) => r.task_date < t)], ['', 'Hoje', rows.filter((r) => r.task_date === t)], ['', 'Próximos', rows.filter((r) => r.task_date > t)]];
+    app.innerHTML = `<div style="max-width:1100px">${groups.map(([cls, title, list]) => `
+      <div class="tasks-group ${cls}"><h2>${title} · ${list.length}</h2>
+        ${list.length ? `<div class="table-wrap" style="max-height:none"><table class="grid"><tbody>${list.map((r) => `<tr data-id="${r.id}">
+          <td style="width:100px" class="${r.task_date < t ? 'late-text' : ''}">${fmtDate(r.task_date)}</td>
+          <td><b>${esc(r.task_title || 'Próximo passo')}</b></td>
+          <td>${esc(r.name)}</td>
+          <td class="muted">${esc(r.pipeline_name)} · ${esc(r.stage_name)}</td>
+          <td>${r.phone ? `<a href="tel:${esc(digits(r.phone))}">${esc(r.phone)}</a>` : ''}</td>
+          <td style="width:110px"><button class="btn sm" data-done="${r.id}">${I.check} Concluir</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="muted" style="padding:4px 2px">Nada aqui.</div>'}
+      </div>`).join('')}</div>`;
+    $$('tr[data-id]').forEach((tr) => tr.addEventListener('click', (e) => { if (!e.target.closest('a,button')) openDrawer(Number(tr.dataset.id)); }));
+    $$('[data-done]').forEach((b) => b.addEventListener('click', () => { const r = rows.find((x) => x.id === Number(b.dataset.done)); openCompleteTask(r, () => renderTarefas()); }));
+  }
+
+  // =====================================================================
+  // Configurações: pipelines, estágios, origens
+  // =====================================================================
+  function swatchPicker(anchor, onPick) {
+    const pop = openPopover(anchor, `<div class="swatches">${CRM.COLORS.map(([c, n]) => `<button class="swatch" style="background:${c}" title="${n}" data-c="${c}"></button>`).join('')}</div>`);
+    $$('[data-c]', pop).forEach((b) => b.addEventListener('click', () => { closePopover(); onPick(b.dataset.c); }));
+  }
+  async function renderConfig() {
+    await loadMeta();
+    const pipes = state.meta.pipelines;
+    if (!pipes.some((p) => p.id === state.settingsPipe)) state.settingsPipe = pipe().id;
+    const sp = pipes.find((p) => p.id === state.settingsPipe);
+    app.innerHTML = `<div class="settings">
+      <section class="panel"><div class="panel-h"><h2>Pipelines</h2></div><div class="panel-b">
+        ${pipes.map((p) => `<div class="list-row ${p.id === sp.id ? 'sel' : ''}"><button class="pipe-item" data-pick="${p.id}"><b>${esc(p.name)}</b><div class="muted" style="font-size:12px">${p.stages.length} estágios · ${p.leads} leads</div></button></div>`).join('')}
+        <form id="new-pipe" class="list-row" style="margin-top:8px"><input type="text" name="name" placeholder="Nome do novo pipeline"><button class="btn sm primary">Criar</button></form>
+      </div></section>
+      <section class="panel"><div class="panel-h"><h2>Estágios de</h2><input type="text" id="pipe-name" value="${esc(sp.name)}" style="flex:1;font-weight:600"><button class="btn sm danger" id="pipe-del">Excluir pipeline</button></div><div class="panel-b">
+        <div class="muted" style="font-size:13px;margin-bottom:8px">A ordem aqui é a ordem das colunas no quadro. Clique na cor para trocar.</div>
+        ${sp.stages.map((s, i) => `<div class="list-row" data-stage="${s.id}">
+          <button class="swatch" style="background:${s.color}" data-color="${s.id}" title="Cor"></button>
+          <input type="text" value="${esc(s.name)}" data-rename="${s.id}">
+          <button class="mini-btn" data-up="${i}" title="Subir" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="mini-btn" data-down="${i}" title="Descer" ${i === sp.stages.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="mini-btn del" data-delstage="${s.id}" title="Excluir estágio">×</button></div>`).join('')}
+        <form id="new-stage" class="list-row" style="margin-top:8px"><input type="text" name="name" placeholder="Nome do novo estágio"><button class="btn sm primary">Adicionar estágio</button></form>
+      </div></section>
+      <section class="panel"><div class="panel-h"><h2>Origens do lead</h2></div><div class="panel-b">
+        <div class="muted" style="font-size:13px;margin-bottom:8px">A lista que aparece no campo Origem e na importação.</div>
+        ${state.meta.origins.map((o) => `<div class="list-row">
+          <button class="swatch" style="background:${o.color}" data-ocolor="${o.id}" title="Cor"></button>
+          <input type="text" value="${esc(o.name)}" data-orename="${o.id}">
+          <button class="mini-btn del" data-odel="${o.id}" title="Excluir origem">×</button></div>`).join('') || '<div class="muted">Nenhuma origem cadastrada.</div>'}
+        <form id="new-origin" class="list-row" style="margin-top:8px"><input type="text" name="name" placeholder="Ex.: Vazamento (Leak), LinkedIn…"><button class="btn sm primary">Adicionar</button></form>
+      </div></section>
+    </div>`;
+    const act = async (fn, msg) => { try { await fn(); if (msg) toast(msg); } catch (e) { fail(e); } await renderConfig(); };
+    $$('[data-pick]').forEach((b) => b.addEventListener('click', () => { state.settingsPipe = Number(b.dataset.pick); renderConfig(); }));
+    $('#new-pipe').addEventListener('submit', (e) => { e.preventDefault(); const name = e.target.name.value; act(async () => { const r = await api('POST', '/api/pipelines', { name }); state.settingsPipe = r.id; }, 'Pipeline criado'); });
+    $('#pipe-name').addEventListener('change', (e) => act(() => api('PATCH', `/api/pipelines/${sp.id}`, { name: e.target.value }), 'Pipeline renomeado'));
+    $('#pipe-del').addEventListener('click', () => {
+      if (!confirm(`Excluir o pipeline "${sp.name}"${sp.leads ? ` e os ${sp.leads} leads dele` : ''}? Não dá para desfazer.`)) return;
+      act(() => api('DELETE', `/api/pipelines/${sp.id}`), 'Pipeline excluído');
+    });
+    $('#new-stage').addEventListener('submit', (e) => { e.preventDefault(); const name = e.target.name.value; act(() => api('POST', `/api/pipelines/${sp.id}/stages`, { name, color: CRM.COLORS[sp.stages.length % CRM.COLORS.length][0] }), 'Estágio adicionado'); });
+    $$('[data-rename]').forEach((i) => i.addEventListener('change', () => act(() => api('PATCH', `/api/stages/${i.dataset.rename}`, { name: i.value }))));
+    $$('[data-color]').forEach((b) => b.addEventListener('click', () => swatchPicker(b, (c) => act(() => api('PATCH', `/api/stages/${b.dataset.color}`, { color: c })))));
+    const reorder = (from, to) => { const ids = sp.stages.map((s) => s.id); const [x] = ids.splice(from, 1); ids.splice(to, 0, x); act(() => api('POST', `/api/pipelines/${sp.id}/stage-order`, { ids })); };
+    $$('[data-up]').forEach((b) => b.addEventListener('click', () => reorder(Number(b.dataset.up), Number(b.dataset.up) - 1)));
+    $$('[data-down]').forEach((b) => b.addEventListener('click', () => reorder(Number(b.dataset.down), Number(b.dataset.down) + 1)));
+    $$('[data-delstage]').forEach((b) => b.addEventListener('click', async () => {
+      const s = sp.stages.find((x) => x.id === Number(b.dataset.delstage));
+      const n = (await api('GET', `/api/leads?stage=${s.id}`)).length;
+      if (!n) { if (confirm(`Excluir o estágio "${s.name}"?`)) act(() => api('DELETE', `/api/stages/${s.id}`), 'Estágio excluído'); return; }
+      const others = sp.stages.filter((x) => x.id !== s.id);
+      const m = openModal(`<div class="modal-h"><h2>Excluir "${esc(s.name)}"</h2><button class="x" data-x>×</button></div>
+        <div class="modal-b"><div>Este estágio tem <b>${n}</b> lead(s). Para onde eles vão?</div><select id="mv">${opts(others.map((x) => [x.id, x.name]))}</select></div>
+        <div class="modal-f"><button class="btn" data-x>Cancelar</button><button class="btn primary danger" id="go" style="color:#fff;background:var(--red);border-color:var(--red)">Mover e excluir</button></div>`);
+      $$('[data-x]', m).forEach((x) => x.addEventListener('click', closeModal));
+      $('#go', m).addEventListener('click', () => { const to = $('#mv', m).value; closeModal(); act(() => api('DELETE', `/api/stages/${s.id}?move_to=${to}`), 'Estágio excluído'); });
+    }));
+    $('#new-origin').addEventListener('submit', (e) => { e.preventDefault(); const name = e.target.name.value; act(() => api('POST', '/api/origins', { name, color: CRM.COLORS[state.meta.origins.length % CRM.COLORS.length][0] }), 'Origem adicionada'); });
+    $$('[data-orename]').forEach((i) => i.addEventListener('change', () => act(() => api('PATCH', `/api/origins/${i.dataset.orename}`, { name: i.value }))));
+    $$('[data-ocolor]').forEach((b) => b.addEventListener('click', () => swatchPicker(b, (c) => act(() => api('PATCH', `/api/origins/${b.dataset.ocolor}`, { color: c })))));
+    $$('[data-odel]').forEach((b) => b.addEventListener('click', () => {
+      if (confirm('Excluir esta origem? Os leads com ela ficam "sem origem".')) act(() => api('DELETE', `/api/origins/${b.dataset.odel}`), 'Origem excluída');
+    }));
   }
 
   // =====================================================================
   // Importar CSV
   // =====================================================================
   const TARGETS = [
-    ['name', 'Nome da conta', /^(nome|razao|razao social|instituicao|ies|hospital|estabelecimento|empresa|conta|nome fantasia|organizacao|vitima|victim|nome da ies|nome do estabelecimento)$|razao social|nome fantasia|nome da (ies|instituicao|empresa)/],
-    ['domain', 'Site ou domínio', /dominio|domain|site|url|website/],
+    ['name', 'Nome do lead *', /^(nome|lead|razao social|nome fantasia|empresa|instituicao|hospital|estabelecimento|organizacao|conta|vitima|victim|nome do estabelecimento|nome da empresa|nome da ies)$|razao social|nome fantasia|nome da (ies|instituicao|empresa)|nome do lead/],
+    ['company', 'Empresa', /^(empresa|companhia|company|organizacao)$/],
+    ['contact_name', 'Contato', /contato|responsavel|nome do contato|decisor/],
+    ['role', 'Cargo', /cargo|funcao|role|titulo/],
+    ['phone', 'Telefone', /telefone|fone|phone|celular|whats/],
+    ['email', 'E-mail', /e-?mail/],
+    ['domain', 'Site', /dominio|domain|site|url|website/],
     ['cnpj', 'CNPJ', /cnpj/],
     ['city', 'Cidade', /cidade|municipio|city/],
     ['uf', 'UF', /^(uf|estado|sg_uf|state)$/],
-    ['sector', 'Setor', /setor|segmento|sector|industry/],
-    ['size', 'Porte', /porte|funcionarios|employees/],
-    ['track', 'Trilha', /trilha/],
-    ['source', 'Origem da lista', /origem|fonte da lista/],
-    ['notes', 'Observação', /observ|notas?$|comentario/],
-    ['contact_name', 'Contato: nome', /contato|responsavel|nome do contato|diretor/],
-    ['contact_role', 'Contato: cargo', /cargo|funcao/],
-    ['contact_phone', 'Contato: telefone', /telefone|fone|phone|celular|whats/],
-    ['contact_email', 'Contato: e-mail', /e-?mail/],
-    ['finding_source', 'Achado: fonte', /fonte do achado|leak source|fonte$|^source$/],
-    ['finding_date', 'Achado: data', /data do achado|discovered|published|data$|^date$/],
-    ['finding_credentials', 'Achado: credenciais', /credenciais|credentials|qtd/],
-    ['finding_severity', 'Achado: gravidade', /gravidade|severidade|severity/],
-    ['finding_published', 'Achado: publicado', /publicado/],
-    ['finding_note', 'Achado: observação', /obs(ervacao)? do analista|analista/],
+    ['value', 'Valor', /valor|value|ticket/],
+    ['origin', 'Origem', /origem|source|fonte/],
+    ['notes', 'Observações', /observ|notas?$|comentario|descricao/],
+    ['task_title', 'Próximo passo', /proximo passo|tarefa/],
+    ['task_date', 'Data do próximo passo', /data do proximo|data da tarefa|follow ?up/],
   ];
-  const foldTxt = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-
+  const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
   function parseCsv(text) {
     text = text.replace(/^﻿/, '');
     const first = text.split(/\r?\n/, 1)[0];
@@ -976,9 +629,8 @@
     const rows = []; let row = []; let cell = ''; let q = false;
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
-      if (q) {
-        if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch;
-      } else if (ch === '"') q = true;
+      if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+      else if (ch === '"') q = true;
       else if (ch === delim) { row.push(cell); cell = ''; }
       else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
       else cell += ch;
@@ -989,182 +641,111 @@
   function guessMapping(headers) {
     const map = {}; const used = new Set();
     for (const [key, , re] of TARGETS) {
-      const idx = headers.findIndex((h, i) => !used.has(i) && re.test(foldTxt(h)));
+      const idx = headers.findIndex((h, i) => !used.has(i) && re.test(fold(h)));
       if (idx >= 0) { map[key] = idx; used.add(idx); }
     }
-    if (map.name === undefined) { const i = headers.findIndex((h, j) => !used.has(j) && /nome/.test(foldTxt(h))); if (i >= 0) map.name = i; }
+    if (map.name === undefined) { const i = headers.findIndex((h, j) => !used.has(j) && /nome/.test(fold(h))); if (i >= 0) map.name = i; }
     return map;
   }
+  const mappedRows = () => { const d = state.importData; return d.rows.map((r) => Object.fromEntries(Object.entries(d.map).map(([k, i]) => [k, (r[i] || '').trim()]))); };
 
   function renderImportar() {
     const d = state.importData;
     if (!d) {
-      app.innerHTML = `<section class="card" style="max-width:760px"><div class="card-h"><h2>Importar planilha (CSV)</h2></div>
-        <div class="card-b" style="display:flex;flex-direction:column;gap:10px">
-          <p style="margin:0">Exporte a planilha como CSV (separado por ponto e vírgula ou vírgula). Na próxima etapa você aponta qual coluna vai para qual campo, vê quantas linhas vão entrar e quais são duplicadas por domínio ou CNPJ, antes de gravar.</p>
+      app.innerHTML = `<section class="panel" style="max-width:760px"><div class="panel-h"><h2>Importar planilha (CSV)</h2></div>
+        <div class="panel-b" style="display:flex;flex-direction:column;gap:12px">
+          <div>No Excel ou Google Planilhas, salve como <b>CSV</b>. Depois você escolhe o pipeline, o estágio e a origem, confere as colunas e importa tudo de uma vez.</div>
           <input type="file" id="file" accept=".csv,text/csv,.txt">
-          <details><summary class="muted">ou colar o conteúdo</summary><textarea id="paste" rows="6" placeholder="nome;cidade;uf;telefone…"></textarea><button class="btn" id="paste-go" style="margin-top:6px">Usar texto colado</button></details>
         </div></section>`;
       $('#file').addEventListener('change', (e) => {
         const file = e.target.files[0]; if (!file) return;
         const read = (enc) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsText(file, enc); });
-        read('utf-8').then((txt) => (txt.includes('�') ? read('windows-1252') : txt)).then((txt) => loadCsv(txt, file.name));
+        read('utf-8').then((txt) => (txt.includes('�') ? read('windows-1252') : txt)).then((txt) => {
+          const rows = parseCsv(txt);
+          if (rows.length < 2) return toast('Arquivo sem linhas de dados', true);
+          const headers = rows[0].map((h) => h.trim());
+          state.importData = { name: file.name, headers, rows: rows.slice(1), map: guessMapping(headers), pipeline: pipe().id, stage: null, origin: '' };
+          renderImportar();
+        });
       });
-      $('#paste-go').addEventListener('click', () => loadCsv($('#paste').value, 'texto colado'));
       return;
     }
-    const mapped = mappedRows();
-    const sample = mapped.slice(0, 5);
+    const p = state.meta.pipelines.find((x) => x.id === d.pipeline) || pipe();
+    if (!p.stages.some((s) => s.id === d.stage)) d.stage = p.stages[0].id;
+    const sample = mappedRows().slice(0, 5);
     const shown = TARGETS.filter(([k]) => d.map[k] !== undefined);
-    app.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px;max-width:1100px">
-      <section class="card"><div class="card-h"><h2>1. Colunas</h2><span class="muted">${esc(d.name)} · ${d.rows.length} linhas</span><span class="spacer"></span><button class="btn sm" id="imp-reset">Trocar arquivo</button></div>
-        <div class="card-b map-grid">${TARGETS.map(([k, l]) => `<label><span>${l}</span><select data-map="${k}"><option value="">— ignorar —</option>${d.headers.map((h, i) => `<option value="${i}"${d.map[k] === i ? ' selected' : ''}>${esc(h || `coluna ${i + 1}`)}</option>`).join('')}</select></label>`).join('')}</div></section>
-      <section class="card"><div class="card-h"><h2>Prévia</h2><span class="muted">primeiras ${sample.length} linhas</span></div>
-        <div class="table-wrap"><table class="grid"><thead><tr>${shown.map(([, l]) => `<th class="nosort">${l}</th>`).join('')}</tr></thead>
-        <tbody>${sample.map((r) => `<tr>${shown.map(([k]) => `<td><span class="clip">${esc(r[k] || '')}</span></td>`).join('')}</tr>`).join('')}</tbody></table></div></section>
-      <section class="card"><div class="card-h"><h2>2. Para todas as linhas</h2></div>
-        <div class="card-b form-grid">
-          <label>Trilha (se a planilha não tiver)<select id="imp-track">${opts(CRM.TRACKS, d.track)}</select></label>
-          <label>Origem da lista<input type="text" id="imp-source" value="${esc(d.source || '')}" list="sources2" placeholder="e-MEC, CNES…"></label>
-          <label>Primeiro passo a partir de<input type="date" id="imp-date" value="${esc(d.date || CRM.today())}"></label>
-          <label>Ação<input type="text" id="imp-action" value="${esc(d.action || 'Primeira tentativa')}"></label>
-          <label>Distribuir por dia útil (0 = todas no mesmo dia)<input type="number" id="imp-perday" min="0" value="${esc(d.perDay ?? 20)}"></label>
-          <datalist id="sources2">${['e-MEC', 'CNES', 'ransomware.live', 'LeakRadar', 'indicação', 'associação'].map((s) => `<option value="${s}">`).join('')}</datalist>
-        </div></section>
-      <section class="card"><div class="card-h"><h2>3. Conferir e gravar</h2></div>
-        <div class="card-b" id="imp-check"><button class="btn primary" id="imp-verify">Verificar duplicatas</button></div></section>
+    app.innerHTML = `<div style="display:flex;flex-direction:column;gap:14px;max-width:1150px">
+      <section class="panel"><div class="panel-h"><h2>1. Para onde vão os leads</h2><span class="muted">${esc(d.name)} · ${d.rows.length} linhas</span><span class="spacer"></span><button class="btn sm" id="reset">Trocar arquivo</button></div>
+        <div class="panel-b fields" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr))">
+          <label>Pipeline<select id="i-pipe">${opts(state.meta.pipelines.map((x) => [x.id, x.name]), p.id)}</select></label>
+          <label>Estágio<select id="i-stage">${opts(p.stages.map((s) => [s.id, s.name]), d.stage)}</select></label>
+          <label>Origem<select id="i-origin">${opts(state.meta.origins.map((o) => [o.id, o.name]), d.origin, 'Sem origem')}</select></label>
+        </div>
+        <div class="panel-b muted" style="padding-top:0;font-size:13px">Se a planilha tiver uma coluna Origem com um nome já cadastrado em Configurações, vale o da planilha; senão, vale a origem escolhida acima.</div></section>
+      <section class="panel"><div class="panel-h"><h2>2. Colunas da planilha</h2></div>
+        <div class="panel-b map-grid">${TARGETS.map(([k, l]) => `<label><span>${l}</span><select data-map="${k}"><option value="">— ignorar —</option>${d.headers.map((h, i) => `<option value="${i}"${d.map[k] === i ? ' selected' : ''}>${esc(h || `coluna ${i + 1}`)}</option>`).join('')}</select></label>`).join('')}</div></section>
+      <section class="panel"><div class="panel-h"><h2>Prévia</h2><span class="muted">primeiras ${sample.length} linhas</span></div>
+        <div class="table-wrap" style="border:0;border-radius:0"><table class="grid"><thead><tr>${shown.map(([, l]) => `<th class="nosort">${l.replace(' *', '')}</th>`).join('')}</tr></thead>
+        <tbody>${sample.map((r) => `<tr>${shown.map(([k]) => `<td>${esc(r[k] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div></section>
+      <section class="panel"><div class="panel-h"><h2>3. Conferir e importar</h2></div><div class="panel-b" id="i-check"><button class="btn primary" id="verify">Verificar duplicatas</button></div></section>
     </div>`;
-    const keep = () => Object.assign(d, { track: $('#imp-track').value, source: $('#imp-source').value, date: $('#imp-date').value, action: $('#imp-action').value, perDay: $('#imp-perday').value });
-    $('#imp-reset').addEventListener('click', () => { state.importData = null; renderImportar(); });
-    $$('[data-map]').forEach((s) => s.addEventListener('change', () => { keep(); if (s.value === '') delete d.map[s.dataset.map]; else d.map[s.dataset.map] = Number(s.value); renderImportar(); }));
-    $('#imp-verify').addEventListener('click', async () => {
-      keep();
-      if (d.map.name === undefined) { toast('Aponte qual coluna é o nome da conta', { error: true }); return; }
+    $('#reset').addEventListener('click', () => { state.importData = null; renderImportar(); });
+    $('#i-pipe').addEventListener('change', (e) => { d.pipeline = Number(e.target.value); d.stage = null; renderImportar(); });
+    $('#i-stage').addEventListener('change', (e) => { d.stage = Number(e.target.value); });
+    $('#i-origin').addEventListener('change', (e) => { d.origin = e.target.value; });
+    $$('[data-map]').forEach((s) => s.addEventListener('change', () => { if (s.value === '') delete d.map[s.dataset.map]; else d.map[s.dataset.map] = Number(s.value); renderImportar(); }));
+    $('#verify').addEventListener('click', async () => {
+      if (d.map.name === undefined) return toast('Escolha qual coluna é o nome do lead', true);
       const rows = mappedRows();
       try {
-        const c = await api('POST', '/api/import/check', { rows: rows.map((r) => ({ name: r.name, domain: r.domain, cnpj: r.cnpj })) });
-        const dupN = c.duplicates.length;
-        const willEnter = (skip) => c.total - c.empty - (skip ? c.duplicates.filter((x) => rows[x.index].name && rows[x.index].name.trim()).length : 0);
-        $('#imp-check').innerHTML = `
-          <p style="margin:0 0 6px"><b>${c.total}</b> linhas no arquivo · <b>${dupN}</b> duplicadas · <b>${c.empty}</b> sem nome (ignoradas)</p>
-          ${dupN ? `<details ${dupN <= 15 ? 'open' : ''}><summary class="muted">ver duplicadas</summary><table class="mini">${c.duplicates.slice(0, 200).map((x) => `<tr><td>linha ${x.index + 2}</td><td>${esc(rows[x.index].name || '')}</td><td class="muted">mesmo ${x.by} de ${x.existing ? `<a href="#/conta/${x.existing.id}">${esc(x.existing.name)}</a> (já cadastrada)` : `linha ${x.row + 2} do arquivo`}</td></tr>`).join('')}</table></details>` : ''}
-          <label class="check" style="margin:8px 0"><input type="checkbox" id="imp-skip" checked> Pular duplicadas</label>
-          <button class="btn primary" id="imp-go">Importar <span id="imp-n">${willEnter(true)}</span> contas</button>`;
-        $('#imp-skip').addEventListener('change', (e) => { $('#imp-n').textContent = willEnter(e.target.checked); });
-        $('#imp-go').addEventListener('click', async () => {
-          keep();
-          $('#imp-go').disabled = true;
+        const c = await api('POST', '/api/import/check', { rows });
+        const willEnter = (skip) => c.total - c.empty - (skip ? c.duplicates.length : 0);
+        $('#i-check').innerHTML = `
+          <p style="margin:0 0 8px"><b>${c.total}</b> linhas · <b>${c.duplicates.length}</b> duplicadas · <b>${c.empty}</b> sem nome (ignoradas)</p>
+          ${c.unknown_origins.length ? `<p style="margin:0 0 8px" class="muted">Origens da planilha que não estão cadastradas (vão usar a origem escolhida acima): ${c.unknown_origins.map((o) => `<b>${esc(o.name)}</b> (${o.n})`).join(', ')}. Para usá-las, cadastre em Configurações antes de importar.</p>` : ''}
+          ${c.duplicates.length ? `<details ${c.duplicates.length <= 10 ? 'open' : ''}><summary class="muted">ver duplicadas</summary><table class="grid" style="margin:6px 0">${c.duplicates.slice(0, 300).map((x) => `<tr><td>linha ${x.index + 2}</td><td>${esc(rows[x.index].name)}</td><td class="muted">mesmo ${x.by} de ${x.existing ? `<b>${esc(x.existing.name)}</b> (já no CRM)` : `linha ${x.row + 2} da planilha`}</td></tr>`).join('')}</table></details>` : ''}
+          <label style="display:flex;gap:8px;align-items:center;margin:10px 0"><input type="checkbox" id="skip" checked> Pular duplicadas</label>
+          <button class="btn primary" id="go">Importar <span id="n">${willEnter(true)}</span> leads</button>`;
+        $('#skip').addEventListener('change', (e) => { $('#n').textContent = willEnter(e.target.checked); });
+        $('#go').addEventListener('click', async () => {
+          $('#go').disabled = true;
           try {
-            const r = await api('POST', '/api/import', { rows, skip_duplicates: $('#imp-skip').checked, next: { date: d.date, action: d.action, per_day: d.perDay, track: d.track, source: d.source } });
-            state.importData = null;
-            toast(`${r.created} contas importadas${r.skipped ? ` · ${r.skipped} puladas` : ''}`);
-            location.hash = '#/contas';
-          } catch (e) { $('#imp-go').disabled = false; fail(e); }
+            const r = await api('POST', '/api/import', { rows, pipeline_id: d.pipeline, stage_id: d.stage, origin_id: d.origin ? Number(d.origin) : null, skip_duplicates: $('#skip').checked });
+            state.importData = null; state.pipelineId = d.pipeline; store.set('pipeline', d.pipeline);
+            toast(`${r.created} leads importados${r.skipped ? ` · ${r.skipped} pulados` : ''}`);
+            location.hash = '#/oportunidades';
+          } catch (e) { $('#go').disabled = false; fail(e); }
         });
       } catch (e) { fail(e); }
     });
   }
-  function loadCsv(text, name) {
-    const all = parseCsv(text);
-    if (all.length < 2) { toast('Arquivo sem linhas de dados', { error: true }); return; }
-    const headers = all[0].map((h) => h.trim());
-    state.importData = { name, headers, rows: all.slice(1), map: guessMapping(headers) };
-    renderImportar();
-  }
-  function mappedRows() {
-    const d = state.importData;
-    return d.rows.map((r) => Object.fromEntries(Object.entries(d.map).map(([k, i]) => [k, (r[i] || '').trim()])));
-  }
 
   // =====================================================================
-  // Roteamento, cadastro rápido e teclado
+  // Rotas e teclado
   // =====================================================================
   async function refresh() {
-    const [name, id] = (location.hash.replace(/^#\/?/, '') || 'hoje').split('/');
-    const view = { hoje: 'hoje', contas: 'contas', conta: 'conta', numeros: 'numeros', importar: 'importar' }[name] || 'hoje';
-    if (view !== state.view) { state.sel = -1; window.scrollTo(0, 0); }
-    state.view = view;
+    const tab = (location.hash.replace(/^#\/?/, '') || 'oportunidades').split('/')[0];
+    const view = ['oportunidades', 'tarefas', 'importar', 'configuracoes'].includes(tab) ? tab : 'oportunidades';
     $$('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === view));
     try {
-      if (view === 'hoje') await renderHoje();
-      else if (view === 'contas') await renderContas();
-      else if (view === 'conta') await renderConta(id);
-      else if (view === 'numeros') await renderNumeros();
+      if (!state.meta) await loadMeta();
+      if (view === 'oportunidades') await renderOportunidades();
+      else if (view === 'tarefas') await renderTarefas();
       else if (view === 'importar') renderImportar();
-    } catch (e) { app.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; }
+      else await renderConfig();
+    } catch (e) { app.innerHTML = `<div class="panel panel-b">${esc(e.message)}</div>`; }
   }
-  window.addEventListener('hashchange', () => { closeModal(); closePopover(); refresh(); });
-
-  $('#quick-create').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const input = $('#qc');
-    const name = input.value.trim();
-    if (!name) return;
-    try {
-      const a = await api('POST', '/api/accounts', { name });
-      input.value = '';
-      input.blur();
-      toast(`“${a.name}” criada em A contatar · na fila de hoje`, { link: `#/conta/${a.id}`, linkText: 'abrir ficha' });
-      if (state.view === 'hoje' || state.view === 'contas') refresh();
-    } catch (err) { fail(err); }
-  });
-  $('#qc').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.target.value = ''; e.target.blur(); } });
-
-  function showHelp() {
-    openModal(`<div class="modal-h"><h2>Atalhos de teclado</h2></div><div class="modal-b"><div class="help-list">
-      ${[['N', 'Nova conta (cadastro em uma linha)'], ['R', 'Registrar contato (linha selecionada ou ficha)'], ['P', 'Próximo passo: concluir / definir'], ['A', 'Adiar (1, 3 ou 7 dias)'],
-        ['J / K  ↓ / ↑', 'Mover seleção na lista'], ['Enter / O', 'Abrir ficha'], ['X', 'Marcar linha (Contas, ações em lote)'], ['E', 'Editar conta (ficha)'], ['/', 'Buscar em Contas'],
-        ['1 2 3 4', 'Hoje, Contas, Números, Importar'], ['Esc', 'Fechar caixa'],
-        ['Na caixa de registro', '1–5 resultado · l w e i p canal · Enter salva']].map(([k, l]) => `<kbd>${k}</kbd><span>${l}</span>`).join('')}
-    </div></div><div class="modal-f"><span class="spacer"></span><button class="btn" data-x>Fechar</button></div>`);
-    $('[data-x]', modalRoot).addEventListener('click', closeModal);
-  }
-  $('#help-btn').addEventListener('click', showHelp);
-
+  window.addEventListener('hashchange', () => { closeModal(); closePopover(); closeDrawer(); refresh(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (popRoot.firstChild) { closePopover(); e.preventDefault(); return; }
-      if (modalOpen()) { closeModal(); e.preventDefault(); return; }
+      if (popRoot.firstChild) return closePopover();
+      if (modalRoot.firstChild) return closeModal();
+      if (drawerRoot.firstChild) return closeDrawer();
     }
-    if (popRoot.firstChild && popKey && popKey(e)) return;
-    if (modalOpen()) { if (modalKey && modalKey.onKey) modalKey.onKey(e); return; }
-    if (e.ctrlKey || e.metaKey || e.altKey || isTyping(document.activeElement)) return;
-    const k = e.key;
-    const row = state.rows[state.sel];
-    const acc = state.view === 'conta' ? state.account : null;
-    const nav = { 1: '#/hoje', 2: '#/contas', 3: '#/numeros', 4: '#/importar' }[k];
-    if (nav) { location.hash = nav; e.preventDefault(); return; }
-    if (k === 'n' || k === 'N') { e.preventDefault(); $('#qc').focus(); return; }
-    if (k === '?') { e.preventDefault(); showHelp(); return; }
-    if (k === '/') { e.preventDefault(); if (state.view !== 'contas') { location.hash = '#/contas'; setTimeout(() => $('#search') && $('#search').focus(), 150); } else $('#search').focus(); return; }
-    if ((k === 'j' || k === 'ArrowDown') && state.rows.length) { e.preventDefault(); state.sel = Math.min(state.rows.length - 1, state.sel + 1); highlight(); return; }
-    if ((k === 'k' || k === 'ArrowUp') && state.rows.length) { e.preventDefault(); state.sel = Math.max(0, state.sel - 1); highlight(); return; }
-    if ((k === 'Enter' || k === 'o') && row && document.activeElement.tagName !== 'A' && document.activeElement.tagName !== 'BUTTON') { e.preventDefault(); location.hash = `#/conta/${row.id}`; return; }
-    if (k === 'x' && row && state.view === 'contas') { e.preventDefault(); toggleCheck(row.id, !state.checked.has(row.id)); return; }
-    if (k === 'r') {
-      e.preventDefault();
-      if (acc) openLog(acc, () => renderConta(acc.id));
-      else if (row && state.view === 'hoje') rowAction('log', row);
-      else if (row) api('GET', `/api/accounts/${row.id}`).then((a) => openLog(a, () => refresh())).catch(fail);
-      return;
-    }
-    if (k === 'p') {
-      e.preventDefault();
-      if (acc) { if (CRM.ACTIVE_STAGES.includes(acc.stage)) openNextStep(acc, { complete: !!acc.next_date }, () => renderConta(acc.id)); }
-      else if (row) openNextStep(row, { complete: !!row.next_date && state.view === 'hoje' });
-      return;
-    }
-    if (k === 'a') {
-      e.preventDefault();
-      if (acc && $('#pp-btn')) openPostpone(acc, $('#pp-btn'), () => renderConta(acc.id));
-      else if (row && state.view === 'hoje' && row.next_date) rowAction('postpone', row);
-      return;
-    }
-    if (k === 'e' && acc) { e.preventDefault(); openAccountForm(acc, () => renderConta(acc.id)); }
+    if (isTyping(document.activeElement) || e.ctrlKey || e.metaKey || e.altKey || modalRoot.firstChild || drawerRoot.firstChild) return;
+    const onBoard = !location.hash || location.hash.startsWith('#/oportunidades');
+    if (e.key === '/' && onBoard && $('#q')) { e.preventDefault(); $('#q').focus(); }
+    if (e.key === 'n' && onBoard && state.meta) { e.preventDefault(); openNewLead(); }
   });
-
-  // Volta a atualizar a fila quando a aba recupera o foco (ex.: virou o dia).
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && !modalOpen() && state.view === 'hoje') refresh(); });
-
   refresh();
 })();

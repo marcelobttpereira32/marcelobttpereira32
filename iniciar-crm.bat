@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title CRM de prospeccao
+title CRM
 rem Roda a partir da pasta deste arquivo, onde quer que ele esteja.
 cd /d "%~dp0"
 
@@ -15,7 +15,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo  CRM de prospeccao rodando em http://localhost:3000
+echo  CRM rodando em http://localhost:3000
 echo  Deixe esta janela aberta enquanto usar. Para fechar o CRM, feche esta janela.
 echo.
 start "" http://localhost:3000
